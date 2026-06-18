@@ -10,6 +10,7 @@ brew "tldr"
 brew "node"
 brew "swiftlint"
 brew "cocoapods"
+brew "gh"
 
 # Apps
 cask "iterm2"

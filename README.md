@@ -1,33 +1,58 @@
-# 新系统自动化安装前置准备
+# mac-setup-security-toolkit
 
-这份文档只记录脚本执行前必须手动完成的事情。后续自动化脚本默认这些条件已经满足，不再尝试替你绕过 GUI、网络或账号确认。
+Apple Silicon Mac setup and security recovery scripts.
 
-## 1. 手动设置触控板
+This repository contains a shell-based toolkit for preparing a clean macOS development environment, installing common developer tools, configuring shell proxy helpers, generating SSH keys, and checking or cleaning known Git hook, shell startup, and LaunchDaemon persistence patterns.
 
-先在系统设置里完成个人操作习惯配置。
+The scripts are intentionally explicit. They do not automate GUI-only setup, bypass account prompts, or hide privileged operations.
 
-建议检查：
+## Scope
 
-1. 系统设置 -> 触控板
-   - 轻点来点按
-   - 跟踪速度
-   - 滚动方向
-   - 辅助点按
-   - 更多手势
+The toolkit covers:
 
-2. 系统设置 -> 辅助功能 -> 指针控制 -> 触控板选项
-   - 开启拖移
-   - 选择三指拖移
+- shell proxy helper installation for command-line network access
+- base developer environment installation through Homebrew and `Brewfile`
+- Xcode command-line environment initialization
+- SSH key generation for Git services
+- post-install verification
+- Git hook scanning and optional quarantine
+- security incident checks for known persistence indicators
+- timestamped reports under `logs/`
 
-这些设置不放进脚本自动处理，避免修改系统辅助功能偏好时产生不可控差异。
+The toolkit does not cover:
 
-## 2. 手动安装 Xcode
+- installing Xcode from the App Store
+- configuring VPN/proxy applications
+- uploading SSH keys to GitHub or GitLab
+- revoking online tokens or sessions
+- replacing a full endpoint security product
 
-从 App Store 手动安装 Xcode。
+## Requirements
 
-安装完成后，先打开一次 Xcode，完成初始组件安装和必要授权确认。
+- Apple Silicon Mac
+- macOS with Terminal or iTerm2
+- Xcode installed from the App Store and opened once
+- network access to GitHub raw or a reachable Homebrew mirror
+- `sudo` access for Xcode initialization, Homebrew-related setup, and system-level security cleanup
 
-后续脚本只负责检查和初始化 Xcode 命令行环境，例如：
+## Manual Setup
+
+### Trackpad
+
+Configure personal trackpad preferences in System Settings.
+
+Common settings to review:
+
+- System Settings -> Trackpad
+- System Settings -> Accessibility -> Pointer Control -> Trackpad Options
+
+These settings are not scripted because they are preference-heavy and GUI-specific.
+
+### Xcode
+
+Install Xcode from the App Store, open it once, and complete the initial component installation and license prompts.
+
+Useful checks:
 
 ```bash
 xcode-select -p
@@ -36,60 +61,73 @@ swift --version
 git --version
 ```
 
-如果 Xcode 没有安装完成，不要执行后续自动化脚本。
+### Network Proxy
 
-## 3. 手动配置 VPN / 代理
+Prepare a trusted VPN or proxy application before running the base installer. The scripts can install shell proxy helper functions, but they do not install or configure the proxy application itself.
 
-先手动准备并配置 VPN 或代理工具。
-
-推荐使用：
-
-```text
-FlClash
-```
-
-也可以使用其他你确认可信的代理工具。
-
-前置要求：
-
-1. 代理工具已经安装。
-2. 已导入你确认可信的配置。
-3. 可以正常访问国际互联网，或至少可以访问清华 Homebrew 镜像。
-4. 本地代理端口已经确认，例如常见端口：
+Common local proxy ports include:
 
 ```text
 7890
 ```
 
-5. 系统代理或命令行代理至少有一种可用。
+If GitHub raw is unreachable, the installer can use the Tsinghua Homebrew mirror where applicable.
 
-后续脚本会优先使用 GitHub 官方源；如果 GitHub raw 不通，会自动尝试清华 Homebrew 镜像。脚本不负责下载安装 FlClash，也不在完全没有外网或镜像网络的情况下强行安装 Homebrew。
+## Quick Start
 
-## 4. 执行安装流程
-
-前面 3 项都完成后，再执行脚本。
-
-推荐从交互入口开始：
+From the repository directory:
 
 ```bash
-cd ~/Desktop/TODO/new
-chmod +x start.sh
+chmod +x *.sh
 ./start.sh
 ```
 
-在菜单中选择 `9) Explain actions and rules` 可以查看每个选项会做什么、是否修改文件、已安装时如何处理。
+The recommended first run is:
 
-安全事件复查和清理也已经集成到菜单：
+1. Choose `1) Install or refresh shell proxy helpers`.
+2. Quit the menu with `0`.
+3. Load the helper and enable the proxy:
+
+```bash
+source ~/.zshrc
+proxy_on 7890
+```
+
+4. Run the menu again:
+
+```bash
+./start.sh
+```
+
+5. Choose `2) Install base environment`.
+
+If the proxy port is different, replace `7890` with the port used by the local proxy application.
+
+## Interactive Menu
+
+`start.sh` is the main entry point.
 
 ```text
+1) Install or refresh shell proxy helpers
+2) Install base environment
+3) Generate SSH keys
+4) Run security verification
+5) Scan Git hooks (dry run)
+6) Quarantine suspicious Git hooks
+7) Quarantine all non-sample Git hooks
+8) Show manual checklist paths
+9) Explain actions and rules
 10) Security incident check (read-only)
 11) Clean user/project incident artifacts
 12) Clean system incident artifacts (sudo)
+0) Quit
 ```
 
-日常复查优先使用 `10`。只有复查报告重新发现相同持久化项时，再使用 `11` 或 `12`。
+Option `9` prints detailed behavior and safety notes for each action.
 
-脚本生成的报告统一放在 `logs/` 下：
+## Logs And Reports
+
+Generated output is kept under `logs/`:
 
 ```text
 logs/install/
@@ -97,60 +135,42 @@ logs/git-hooks/
 logs/security-incidents/
 ```
 
-建议顺序：
+`logs/` is ignored by Git. Reports may contain local paths, quarantined files, command output, or forensic notes.
 
-1. 先选择 `1) Install or refresh shell proxy helpers`。
-2. 退出菜单。
-3. 在当前终端执行：
+## Base Environment
 
-```bash
-source ~/.zshrc
-proxy_on 7890
-```
-
-4. 重新执行 `./start.sh`，选择 `2) Install base environment`。
-
-如果你的代理端口不是 `7890`，把上面的端口替换成代理软件给出的端口。
-
-也可以单独执行基础环境安装脚本。
-
-如果需要写入 Git 用户名和邮箱：
-
-```bash
-GIT_USER_NAME="你的名字" GIT_USER_EMAIL="你的邮箱" ./install_base_env.sh
-```
-
-如果暂时不想设置 Git 用户名和邮箱：
+The base installer is `install_base_env.sh`. It can be run through option `2` in `start.sh` or directly:
 
 ```bash
 ./install_base_env.sh
 ```
 
-脚本会执行：
-
-1. 检查 Apple Silicon、Xcode、Homebrew 安装源网络连通性。
-2. 初始化 Xcode 命令行环境，并把 active developer directory 设置为 `/Applications/Xcode.app/Contents/Developer`。
-3. 安装或更新 Homebrew。
-4. 使用 `Brewfile` 安装 CLI 工具和常用 App。
-5. 安装 Oh My Zsh。
-6. 设置 Oh My Zsh 主题为 `robbyrussell`，插件为 `(git)`。
-7. 设置基础 Git 默认项。
-8. 输出版本验证结果。
-
-默认安装源选择为自动模式：
+Optional Git identity configuration:
 
 ```bash
-./install_base_env.sh
+GIT_USER_NAME="Your Name" GIT_USER_EMAIL="you@example.com" ./install_base_env.sh
 ```
 
-也可以手动指定：
+Homebrew source selection:
 
 ```bash
 HOMEBREW_INSTALL_FROM=github ./install_base_env.sh
 HOMEBREW_INSTALL_FROM=tuna ./install_base_env.sh
 ```
 
-CLI 工具包含：
+Default mode is `auto`.
+
+The installer performs:
+
+- Apple Silicon, Xcode, Brewfile, and network preflight checks
+- Xcode command-line environment initialization
+- Homebrew install or update
+- `Brewfile` installation
+- Oh My Zsh installation when missing
+- basic Oh My Zsh and Git defaults
+- version verification
+
+CLI tools in the current `Brewfile` include:
 
 ```text
 git
@@ -164,9 +184,10 @@ tldr
 node
 swiftlint
 cocoapods
+gh
 ```
 
-GUI App 包含：
+GUI applications in the current `Brewfile` include:
 
 ```text
 iTerm2
@@ -182,95 +203,189 @@ Lookin
 Navicat Premium
 ```
 
-完整日志会写到：
+## Shell Proxy Helpers
 
-```text
-logs/install/
-```
-
-### 代理 helper 安装与用法
-
-`install_base_env.sh` 不设置命令行代理。代理 helper 是独立功能，需要单独执行：
-
-```bash
-cd ~/Desktop/TODO/new
-chmod +x setup_shell_proxy.sh
-./setup_shell_proxy.sh
-```
-
-`setup_shell_proxy.sh` 会写入：
+`setup_shell_proxy.sh` writes:
 
 ```text
 ~/.config/new-mac/proxy.zsh
 ```
 
-并在下面两个文件里加入加载语句：
+It also adds a loader line to:
 
 ```text
 ~/.zshrc
 ~/.zprofile
 ```
 
-这样系统 Terminal 和 iTerm2 / Oh My Zsh 新窗口都能加载这些函数。
-
-当前窗口立即生效：
-
-```bash
-source ~/.zshrc
-```
-
-常见用法：
+Available helper functions:
 
 ```bash
 proxy_set 7890
 proxy_on
+proxy_off
 proxy_status
 proxy_test
+git_proxy_on
+git_proxy_off
+git_proxy_status
 ```
 
-如果你的 VPN 工具有不同端口，例如 HTTP 是 `7897`，SOCKS 是 `7898`：
+For separate HTTP and SOCKS ports:
 
 ```bash
 proxy_set 7897 7898
 proxy_on
 ```
 
-也可以不保存配置，直接临时启用：
+For a one-off shell session:
 
 ```bash
 proxy_on 7897 7898
 ```
 
-Git 单独走代理：
+## SSH Keys
+
+`setup_ssh_keys.sh` creates date-stamped ed25519 SSH keys and updates SSH config entries. Existing keys with the same generated path are not overwritten.
+
+Run through option `3` or directly:
 
 ```bash
-git_proxy_on
-git_proxy_status
-git_proxy_off
+./setup_ssh_keys.sh
 ```
 
-## 5. 后续脚本
+The script does not upload keys to any online service.
 
-基础环境安装完成后，继续执行：
+## Verification
+
+`verify_security.sh` reports environment and security-related state without modifying files.
+
+It checks:
+
+- system and Xcode information
+- expected CLI tools
+- key tool versions
+- SSH public keys
+- known suspicious launch items and processes
+- hosts file indicators
+- executable Git hooks
+
+Run through option `4` or directly:
 
 ```bash
-cd ~/Desktop/TODO/new
-chmod +x setup_ssh_keys.sh verify_security.sh scan_git_hooks.sh
-./setup_shell_proxy.sh
-./setup_ssh_keys.sh
 ./verify_security.sh
+```
+
+## Git Hook Scanning
+
+`scan_git_hooks.sh` scans Git hooks under:
+
+```text
+~/Documents
+~/Desktop
+~/Downloads
+```
+
+Dry run:
+
+```bash
 ./scan_git_hooks.sh
 ```
 
-`scan_git_hooks.sh` 依赖 `rg` 命令；它由 Brewfile 中的 `ripgrep` 提供，也可以单独安装：
+Quarantine suspicious hooks only:
 
 ```bash
-brew install ripgrep
+./scan_git_hooks.sh --apply
 ```
 
-手动安全操作见：
+Quarantine all non-sample hooks:
+
+```bash
+./scan_git_hooks.sh --apply --remove-all-hooks
+```
+
+Git sample hooks such as `pre-commit.sample` are templates and are not executed by Git. Active hooks are files without the `.sample` suffix, such as `pre-commit`, `commit-msg`, or `pre-push`.
+
+Reports include:
+
+```text
+git_repositories.txt
+all_hooks.txt
+suspicious_hooks.txt
+suspicious_hook_details.txt
+quarantined_hooks/
+```
+
+## Security Incident Checks
+
+`cleanup_security_incident.sh` provides reusable checks and cleanup for known persistence patterns found during a prior investigation.
+
+Read-only check:
+
+```bash
+./cleanup_security_incident.sh check
+```
+
+Clean user and project artifacts:
+
+```bash
+./cleanup_security_incident.sh clean
+```
+
+Clean user, project, and system artifacts:
+
+```bash
+./cleanup_security_incident.sh clean --system
+```
+
+The system cleanup mode may request `sudo` and can remove the known LaunchDaemon:
+
+```text
+/Library/LaunchDaemons/com.google.rqbcle.plist
+```
+
+It also restores Software Update rapid/security response preference values.
+
+The check mode is intended for periodic use. It examines:
+
+- shell startup files
+- `defaults invelc`
+- known LaunchDaemon registration
+- matching process names when process enumeration is available
+- Git hooks
+- known Xcode project indicators
+
+Process enumeration can be unavailable in restricted terminal contexts. The file, defaults, launchd, Git hook, and Xcode project checks are the primary signals.
+
+Details from the original incident are documented in:
+
+```text
+SECURITY_INCIDENT_REPORT.md
+```
+
+## Manual Account Security
+
+Some security work must be completed online and is not automated here.
+
+See:
 
 ```text
 ACCOUNT_SECURITY.md
 MIGRATION_CHECKLIST.md
 ```
+
+Typical manual tasks include:
+
+- removing old SSH keys from GitHub/GitLab
+- revoking old personal access tokens
+- reviewing OAuth applications
+- reviewing active sessions
+- avoiding migration of old browser profiles, token files, and unknown shell config
+
+## Notes
+
+- Use option `5` before using `6` or `7`.
+- Use option `10` before using `11` or `12`.
+- Type passwords only into the terminal's `sudo` prompt.
+- Do not pipe untrusted remote scripts into `sh`.
+- Review reports under `logs/` before deleting quarantine data.
