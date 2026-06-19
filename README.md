@@ -116,14 +116,14 @@ If the proxy port is different, replace `7890` with the port used by the local p
 6) Quarantine suspicious Git hooks
 7) Quarantine all non-sample Git hooks
 8) Show manual checklist paths
-9) Explain actions and rules
-10) Security incident check (read-only)
-11) Clean user/project incident artifacts
-12) Clean system incident artifacts (sudo)
+9) Security incident check (read-only)
+10) Clean user/project incident artifacts
+11) Clean system incident artifacts (sudo)
+12) Explain actions and rules
 0) Quit
 ```
 
-Option `9` prints detailed behavior and safety notes for each action.
+Option `12` prints detailed behavior and safety notes for each action.
 
 ## Logs And Reports
 
@@ -346,6 +346,8 @@ The system cleanup mode may request `sudo` and can remove the known LaunchDaemon
 
 It also restores Software Update rapid/security response preference values.
 
+The check and cleanup modes print a terminal summary with the overall conclusion, matching indicator count, `defaults invelc` status, LaunchDaemon status, active hook count, suspicious hook count, and report path.
+
 The check mode is intended for periodic use. It examines:
 
 - shell startup files
@@ -385,7 +387,7 @@ Typical manual tasks include:
 ## Notes
 
 - Use option `5` before using `6` or `7`.
-- Use option `10` before using `11` or `12`.
+- Use option `9` before using `10` or `11`.
 - Type passwords only into the terminal's `sudo` prompt.
 - Do not pipe untrusted remote scripts into `sh`.
 - Review reports under `logs/` before deleting quarantine data.

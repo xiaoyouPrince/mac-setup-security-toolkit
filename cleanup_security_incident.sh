@@ -113,6 +113,69 @@ check_git_hooks() {
   fi
 }
 
+count_matching_files() {
+  matching_files | wc -l | tr -d ' '
+}
+
+defaults_status() {
+  if defaults read invelc >/dev/null 2>&1; then
+    printf 'present'
+  else
+    printf 'absent'
+  fi
+}
+
+launchdaemon_status() {
+  if [[ -e "$LAUNCHD_PLIST" || -L "$LAUNCHD_PLIST" ]] || launchctl print system/com.google.rqbcle >/dev/null 2>&1; then
+    printf 'present'
+  else
+    printf 'absent'
+  fi
+}
+
+active_hook_count() {
+  find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print 2>/dev/null | wc -l | tr -d ' '
+}
+
+suspicious_hook_count() {
+  local count=0
+  local hook
+  while IFS= read -r hook; do
+    [[ -f "$hook" ]] || continue
+    if rg -q -i "$PATTERN" "$hook" 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done < <(find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print 2>/dev/null)
+  printf '%s' "$count"
+}
+
+print_summary() {
+  local phase="$1"
+  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks conclusion
+  matches="$(count_matching_files)"
+  defaults_state="$(defaults_status)"
+  launchdaemon_state="$(launchdaemon_status)"
+  active_hooks="$(active_hook_count)"
+  suspicious_hooks="$(suspicious_hook_count)"
+
+  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$launchdaemon_state" == "absent" && "$suspicious_hooks" -eq 0 ]]; then
+    conclusion="clean"
+  else
+    conclusion="attention required"
+  fi
+
+  {
+    printf '\nSecurity summary (%s)\n' "$phase"
+    printf '  Conclusion: %s\n' "$conclusion"
+    printf '  Matching persistence indicators: %s\n' "$matches"
+    printf '  defaults invelc: %s\n' "$defaults_state"
+    printf '  com.google.rqbcle LaunchDaemon: %s\n' "$launchdaemon_state"
+    printf '  Active non-sample Git hooks: %s\n' "$active_hooks"
+    printf '  Suspicious Git hooks: %s\n' "$suspicious_hooks"
+    printf '  Report: %s\n' "$REPORT"
+  } | tee -a "$REPORT"
+}
+
 run_check() {
   log "Security check started."
   log "Incident directory: $INCIDENT_DIR"
@@ -125,6 +188,7 @@ run_check() {
   snapshot_command "Git hook scan" check_git_hooks
 
   log "Security check finished."
+  print_summary "check"
   log "Review report: $REPORT"
 }
 
@@ -209,6 +273,7 @@ run_clean() {
   snapshot_command "Git hook scan after" check_git_hooks
 
   log "Security cleanup finished."
+  print_summary "cleanup"
   log "Review report: $REPORT"
 }
 

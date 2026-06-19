@@ -267,17 +267,18 @@ Action guide
    Existing installs:
      - Read-only.
 
-10) Security incident check (read-only)
+9) Security incident check (read-only)
    Script: cleanup_security_incident.sh check
    What it does:
      - Checks shell startup files, defaults invelc, known LaunchDaemon registration,
        matching process names when process enumeration is available, Git hooks,
        and the known XYDevTool Xcode project indicators.
+     - Prints a terminal summary with the overall conclusion.
      - Writes a timestamped logs/security-incidents/security_incident_*/cleanup_report.txt.
    Existing installs:
      - Read-only. It does not delete or modify anything.
 
-11) Clean user/project incident artifacts
+10) Clean user/project incident artifacts
    Script: cleanup_security_incident.sh clean
    What it does:
      - Backs up affected files into logs/security-incidents/security_incident_*/backups/.
@@ -289,13 +290,14 @@ Action guide
      - This modifies user/project files. start.sh asks for confirmation first.
      - It does not run sudo and does not modify /Library.
 
-12) Clean system incident artifacts
+11) Clean system incident artifacts
    Script: cleanup_security_incident.sh clean --system
    What it does:
-     - Performs everything in option 11.
+     - Performs everything in option 10.
      - Unloads/removes /Library/LaunchDaemons/com.google.rqbcle.plist when present.
      - Restores Software Update rapid/security response preference values.
      - Attempts to kill matching suspicious processes.
+     - Prints a terminal summary after cleanup.
    Safety:
      - This may ask for sudo in your terminal.
      - Type your password only into the terminal prompt, never into chat.
@@ -364,10 +366,10 @@ show_menu() {
   printf '%s6%s) Quarantine suspicious Git hooks\n' "$C_YELLOW" "$C_RESET"
   printf '%s7%s) Quarantine all non-sample Git hooks\n' "$C_RED" "$C_RESET"
   printf '%s8%s) Show manual checklist paths\n' "$C_CYAN" "$C_RESET"
-  printf '%s9%s) Explain actions and rules\n' "$C_CYAN" "$C_RESET"
-  printf '%s10%s) Security incident check (read-only)\n' "$C_CYAN" "$C_RESET"
-  printf '%s11%s) Clean user/project incident artifacts\n' "$C_YELLOW" "$C_RESET"
-  printf '%s12%s) Clean system incident artifacts (sudo)\n' "$C_RED" "$C_RESET"
+  printf '%s9%s) Security incident check (read-only)\n' "$C_CYAN" "$C_RESET"
+  printf '%s10%s) Clean user/project incident artifacts\n' "$C_YELLOW" "$C_RESET"
+  printf '%s11%s) Clean system incident artifacts (sudo)\n' "$C_RED" "$C_RESET"
+  printf '%s12%s) Explain actions and rules\n' "$C_CYAN" "$C_RESET"
   printf '%s0%s) Quit\n\n' "$C_DIM" "$C_RESET"
   printf '%sChoose an action:%s ' "$C_BOLD" "$C_RESET"
 }
@@ -407,17 +409,17 @@ main() {
       8)
         show_docs
         ;;
-      9|h|H|help)
-        show_action_help
-        ;;
-      10)
+      9)
         run_security_incident_check
         ;;
-      11)
+      10)
         run_security_incident_clean_user
         ;;
-      12)
+      11)
         run_security_incident_clean_system
+        ;;
+      12|h|H|help)
+        show_action_help
         ;;
       0|q|Q)
         printf '%sBye.%s\n' "$C_DIM" "$C_RESET"
