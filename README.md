@@ -1,10 +1,22 @@
 # mac-setup-security-toolkit
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Apple Silicon Mac setup and security recovery scripts.
 
 This repository contains a shell-based toolkit for preparing a clean macOS development environment, installing common developer tools, configuring shell proxy helpers, generating SSH keys, and checking or cleaning known Git hook, shell startup, and LaunchDaemon persistence patterns.
 
 The scripts are intentionally explicit. They do not automate GUI-only setup, bypass account prompts, or hide privileged operations.
+
+## Background
+
+This toolkit began during the rebuild of an Apple Silicon Mac after a clean disk erase and macOS installation. Reinstalling the development environment exposed several practical problems: macOS privacy controls could make terminal access fail with `Operation not permitted`, shell proxy variables did not guarantee that GitHub Raw or a Homebrew mirror was actually reachable, and long-running checks provided little visible progress.
+
+During a review of a newly cloned Git repository, an active non-sample Git hook was detected. Further investigation found related persistence indicators in shell startup configuration, macOS `defaults`, a system LaunchDaemon, and an Xcode project. Determining what each artifact did, preserving evidence, removing user-level files, and completing privileged system cleanup required a sequence of separate commands and reports.
+
+The original setup and investigation commands were useful, but difficult to repeat consistently and easy to omit during a future rebuild or incident. This repository consolidates that work into a single, reviewable toolkit with network preflight checks, progress and status output, Git hook scanning, dry-run and quarantine modes, known-indicator checks, cleanup routines, and timestamped reports.
+
+The operating principle is to inspect before modifying. Read-only checks are separated from cleanup actions, destructive choices require confirmation, and privileged operations remain visible in the terminal.
 
 ## Scope
 
