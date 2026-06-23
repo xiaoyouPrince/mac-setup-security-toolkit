@@ -346,6 +346,10 @@ quarantined_hooks/
 
 该模式还会以 apply 模式调用 Git Hook 扫描器。`~/Documents`、`~/Desktop` 和 `~/Downloads` 下所有命中的非 sample 可疑 Hook，都会先复制到本次事件报告的隔离目录，再从原仓库删除。清理目标来自扫描结果，不再局限于某一个仓库路径。
 
+该模式还会检测后续事件中确认的内存载荷形态：从短 `/tmp` 脚本启动且携带长加密参数的 `osascript`、使用相同参数结构的 `/tmp` 原生可执行文件，以及会自删除的 `/private/tmp/m.app` applet。脚本会先记录并终止命中进程，再清理文件。执行清理前必须关闭 Xcode；否则脚本会停止，防止 Xcode 将内存中的旧工程状态重新写回。
+
+针对 XYDevTool，清理会删除执行 `${A3DC1C3}` 的完整 Shell Build Phase，而不只是删除 `A3DC1C3` 和 `AF17F99` 的变量值。
+
 清理用户、项目和系统文件：
 
 ```bash
@@ -354,14 +358,14 @@ quarantined_hooks/
 
 系统清理模式可能会请求 `sudo` 权限。它会扫描 `/Library/LaunchDaemons`，通过“已知 IOC 加 Shell 执行特征”或“长 Base64 载荷直接解码到 Shell”的结构识别恶意持久化。命中的 plist 会先备份，再根据解析出的 `Label` 卸载并删除；检测不再依赖固定 plist 文件名。该模式还会恢复 macOS 软件更新中快速安全响应的相关偏好设置。
 
-检查和清理完成后，终端会显示概要结论，包括整体状态、匹配到的特征数量、`defaults invelc` 状态、可疑 LaunchDaemon 数量、活动 Hook 数量、可疑 Hook 数量和报告路径。只要仍有可疑特征，检查和清理都会返回非零退出状态；清理模式会在结束前强制重新扫描。
+检查和清理完成后，终端会显示概要结论，包括整体状态、匹配到的特征数量、`defaults invelc` 状态、可疑 LaunchDaemon 数量、可疑内存进程数量、活动 Hook 数量、可疑 Hook 数量和报告路径。只要仍有可疑特征，检查和清理都会返回非零退出状态；清理模式会在结束前强制重新扫描。
 
 只读检查适合定期运行，检查范围包括：
 
 - Shell 启动文件
 - `defaults invelc`
 - 可疑 LaunchDaemon 载荷特征
-- 在允许枚举进程时检查匹配的进程名
+- 自删除的临时 AppleScript/原生进程形态
 - Git Hook
 - 已知 Xcode 项目特征
 

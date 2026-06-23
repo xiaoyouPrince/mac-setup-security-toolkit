@@ -346,6 +346,10 @@ Clean user and project artifacts:
 
 This mode also runs the Git hook scanner in apply mode. Every suspicious non-sample hook under `~/Documents`, `~/Desktop`, and `~/Downloads` is copied into the incident report quarantine directory before removal. Cleanup is driven by scan results rather than a single repository path.
 
+It also detects memory-resident payload shapes observed during the follow-up incident: `osascript` launched from a short `/tmp` script with a long encrypted argument, native `/tmp` executables using the same argument shape, and the self-deleting `/private/tmp/m.app` applet. Matching processes are recorded and terminated before file cleanup. Xcode must be closed before cleanup; otherwise the script stops to prevent stale in-memory project state from restoring the contaminated project file.
+
+For XYDevTool, cleanup removes the complete shell build phase that evaluates `${A3DC1C3}`, not only the `A3DC1C3` and `AF17F99` values.
+
 Clean user, project, and system artifacts:
 
 ```bash
@@ -354,14 +358,14 @@ Clean user, project, and system artifacts:
 
 The system cleanup mode may request `sudo`. It scans `/Library/LaunchDaemons` and identifies malicious persistence using known IOC plus shell-execution traits, or a long Base64 payload decoded directly into a shell. Matching plist files are backed up, unloaded by their parsed `Label`, and removed. Detection does not depend on a fixed plist filename. The mode also restores Software Update rapid/security response preference values.
 
-The check and cleanup modes print a terminal summary with the overall conclusion, matching indicator count, `defaults invelc` status, suspicious LaunchDaemon count, active hook count, suspicious hook count, and report path. Both modes return a non-zero exit status while suspicious indicators remain. Cleanup always re-scans before deciding its final status.
+The check and cleanup modes print a terminal summary with the overall conclusion, matching indicator count, `defaults invelc` status, suspicious LaunchDaemon count, suspicious memory-process count, active hook count, suspicious hook count, and report path. Both modes return a non-zero exit status while suspicious indicators remain. Cleanup always re-scans before deciding its final status.
 
 The check mode is intended for periodic use. It examines:
 
 - shell startup files
 - `defaults invelc`
 - suspicious LaunchDaemon payload traits
-- matching process names when process enumeration is available
+- self-deleting temporary AppleScript/native process shapes
 - Git hooks
 - known Xcode project indicators
 

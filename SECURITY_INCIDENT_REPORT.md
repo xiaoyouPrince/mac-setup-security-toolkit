@@ -161,6 +161,23 @@ The later `com.google.eyibof` LaunchDaemon and toolkit repository hook demonstra
 - detects randomized LaunchDaemon names from payload structure;
 - re-scans after cleanup and returns failure while any suspicious indicator remains.
 
+### Root cause of the recurrence
+
+The 12:56 cleanup removed the on-disk LaunchDaemon and passed an immediate disk scan, but its process cleanup only matched plaintext IOC names. The active payload used deleted temporary files and encrypted command arguments, so it remained outside that match set.
+
+Forensic evidence established this sequence:
+
+- `12:56:58`: cleanup and immediate verification reported clean.
+- `13:58:55`: the first long-running malicious `osascript` started.
+- `14:31:39`: an invalidly signed `/private/tmp/m.app/Contents/MacOS/applet` launched.
+- `14:32`: several `osascript /tmp/vk <encrypted argument>` workers launched and deleted their files.
+- `14:33`–`14:36`: `.zshrc`, both Git hooks, `defaults invelc`, and the Xcode project were restored.
+- `14:41`: a deleted `/private/tmp/pb` native payload continued running as `/tmp/pb ... --chlock`.
+
+The affected Xcode project also still contained a committed shell build phase that evaluated `${A3DC1C3}`. Removing only the setting value left a reusable loader and allowed stale Xcode in-memory project state to write it back.
+
+The corrected cleanup now records and terminates the temporary AppleScript/native process shapes, refuses to edit while Xcode is running, removes the complete loader build phase, and includes memory-process count in the final clean decision.
+
 Recommended periodic local check:
 
 ```bash

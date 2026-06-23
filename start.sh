@@ -271,7 +271,7 @@ Action guide
    Script: cleanup_security_incident.sh check
    What it does:
      - Checks shell startup files, defaults invelc, suspicious LaunchDaemon payload traits,
-       matching process names when process enumeration is available, Git hooks,
+       self-deleting temporary AppleScript/native processes, Git hooks,
        and the known XYDevTool Xcode project indicators.
      - Prints a terminal summary with the overall conclusion.
      - Writes a timestamped logs/security-incidents/security_incident_*/cleanup_report.txt.
@@ -286,11 +286,14 @@ Action guide
      - Removes known malicious ~/.zshrc payload lines.
      - Deletes defaults domain invelc.
      - Scans Documents/Desktop/Downloads and quarantines every suspicious Git hook.
-     - Removes known malicious Xcode build settings A3DC1C3 and AF17F99.
+     - Terminates known /tmp AppleScript/native memory payload shapes.
+     - Removes the complete Xcode shell build phase that loads A3DC1C3, plus
+       malicious build settings A3DC1C3 and AF17F99.
      - Re-scans after cleanup and returns a non-zero status if indicators remain.
    Safety:
      - This modifies user/project files. start.sh asks for confirmation first.
      - It does not run sudo and does not modify /Library.
+     - Xcode must be closed first so stale in-memory project state cannot be saved back.
 
 11) Clean system incident artifacts
    Script: cleanup_security_incident.sh clean --system

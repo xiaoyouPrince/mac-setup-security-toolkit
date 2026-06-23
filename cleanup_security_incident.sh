@@ -43,6 +43,7 @@ USER_LAUNCH_AGENT_DIR="${USER_LAUNCH_AGENT_DIR:-$HOME/Library/LaunchAgents}"
 SKIP_SYSTEM_PREFERENCE_RESTORE="${SKIP_SYSTEM_PREFERENCE_RESTORE:-false}"
 SKIP_PROCESS_CLEANUP="${SKIP_PROCESS_CLEANUP:-false}"
 SKIP_USER_DEFAULTS="${SKIP_USER_DEFAULTS:-false}"
+SKIP_XCODE_PROCESS_CHECK="${SKIP_XCODE_PROCESS_CHECK:-false}"
 SHELL_FILES=(
   "$HOME/.zshrc"
   "$HOME/.zprofile"
@@ -56,11 +57,16 @@ PERSISTENCE_PATHS=(
   "$SYSTEM_LAUNCH_AGENT_DIR"
   "$USER_LAUNCH_AGENT_DIR"
 )
-PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p='
+PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p=|A3DC1C3|AF17F99'
 PROCESS_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|com.google.rqbcle|CloudTelemetryService'
 LAUNCHD_IOC_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|CloudTelemetryService'
 LAUNCHD_EXEC_PATTERN='base64[[:space:]]+--decode|xxd[[:space:]]+-p[[:space:]]+-r|curl .*\|[[:space:]]*(ba)?sh|defaults[[:space:]]+read.*\|.*(ba)?sh'
 LAUNCHD_OBFUSCATED_EXEC_PATTERN='echo[[:space:]]+[A-Za-z0-9+/=]{32,}.*\|[[:space:]]*base64[[:space:]]+--decode[[:space:]]*\|[[:space:]]*(ba)?sh'
+MEMORY_PROCESS_PATTERNS=(
+  '^osascript /(private/)?tmp/[A-Za-z0-9._-]+ [A-Za-z0-9+/=]{100,}'
+  '^/(private/)?tmp/[A-Za-z0-9._-]+ [A-Za-z0-9+/=]{100,}'
+  '/private/tmp/m\.app/Contents/MacOS/applet'
+)
 
 mkdir -p "$INCIDENT_DIR/backups"
 : > "$REPORT"
@@ -92,11 +98,62 @@ snapshot_command() {
 
 snapshot_processes() {
   {
-    printf '\n== matching processes ==\n'
-    if ! pgrep -af "$PROCESS_PATTERN" 2>&1; then
-      printf 'Process enumeration unavailable or no matching process found. This check is best-effort.\n'
-    fi
+    printf '\n== suspicious memory processes ==\n'
+    local pid found="false"
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] || continue
+      found="true"
+      ps -p "$pid" -ww -o user,pid,ppid,lstart,command 2>&1 || true
+    done < <(find_suspicious_memory_processes)
+    [[ "$found" == "true" ]] || printf 'No suspicious memory process found.\n'
+
+    printf '\n== legacy IOC process-name matches (informational) ==\n'
+    pgrep -af "$PROCESS_PATTERN" 2>&1 || true
   } >> "$REPORT"
+}
+
+find_suspicious_memory_processes() {
+  local pattern
+  for pattern in "${MEMORY_PROCESS_PATTERNS[@]}"; do
+    pgrep -f "$pattern" 2>/dev/null || true
+  done | sort -nu
+}
+
+suspicious_memory_process_count() {
+  find_suspicious_memory_processes | awk 'NF { count++ } END { print count + 0 }'
+}
+
+clean_suspicious_memory_processes() {
+  local list="$INCIDENT_DIR/suspicious_memory_processes.txt"
+  local pid
+  find_suspicious_memory_processes > "$list"
+
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    ps -p "$pid" -ww -o user,pid,ppid,lstart,command >> "$REPORT" 2>&1 || true
+    kill -KILL "$pid" >/dev/null 2>&1 || {
+      if [[ "$SYSTEM_CLEANUP" == "true" ]]; then
+        sudo kill -KILL "$pid" >/dev/null 2>&1 || true
+      fi
+    }
+    log "Terminated suspicious memory process PID $pid"
+  done < "$list"
+
+  sleep 1
+  if [[ "$(suspicious_memory_process_count)" -gt 0 ]]; then
+    log "ERROR: suspicious memory processes remain after termination."
+    return 1
+  fi
+
+  local path backup
+  for path in /tmp/vk /tmp/pb /private/tmp/m.app; do
+    if [[ -e "$path" || -L "$path" ]]; then
+      backup="$INCIDENT_DIR/backups/temp-$(basename "$path").before"
+      cp -Rp "$path" "$backup"
+      rm -rf "$path"
+      log "Backed up and removed malicious temporary artifact: $path"
+    fi
+  done
 }
 
 matching_files() {
@@ -204,6 +261,62 @@ clean_suspicious_git_hooks() {
   fi
 }
 
+malicious_xcode_build_phase_ids() {
+  local project="$1"
+  awk '
+    /Begin PBXShellScriptBuildPhase section/ { in_section = 1; next }
+    /End PBXShellScriptBuildPhase section/ { in_section = 0; capturing = 0 }
+    in_section && !capturing && /\/\*.*\*\/ = \{/ {
+      line = $0
+      sub(/^[ \t]*/, "", line)
+      split(line, fields, " ")
+      id = fields[1]
+      capturing = 1
+      malicious = 0
+      next
+    }
+    in_section && capturing {
+      if ($0 ~ /A3DC1C3/) malicious = 1
+      if ($0 ~ /^[ \t]*};/) {
+        if (malicious) print id
+        capturing = 0
+        id = ""
+      }
+    }
+  ' "$project"
+}
+
+clean_malicious_xcode_project() {
+  local project="$1"
+  local ids="$INCIDENT_DIR/malicious_xcode_build_phase_ids.txt"
+  local id tmp
+
+  malicious_xcode_build_phase_ids "$project" > "$ids"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    tmp="$(mktemp)"
+    awk -v target="$id" '
+      !skipping && index($0, target) > 0 && /\/\*.*\*\/ = \{/ { skipping = 1; next }
+      skipping { if ($0 ~ /^[ \t]*};/) skipping = 0; next }
+      index($0, target) > 0 { next }
+      { print }
+    ' "$project" > "$tmp"
+    cat "$tmp" > "$project"
+    rm -f "$tmp"
+    log "Removed malicious Xcode shell build phase: $id"
+  done < "$ids"
+
+  tmp="$(mktemp)"
+  awk '
+    /A3DC1C3 =/ { next }
+    /AF17F99 =/ { next }
+    { print }
+  ' "$project" > "$tmp"
+  cat "$tmp" > "$project"
+  rm -f "$tmp"
+  log "Removed malicious Xcode build settings A3DC1C3 and AF17F99 from $project"
+}
+
 count_matching_files() {
   matching_files | wc -l | tr -d ' '
 }
@@ -246,15 +359,16 @@ suspicious_hook_count() {
 
 print_summary() {
   local phase="$1"
-  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks suspicious_launchdaemons conclusion
+  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks suspicious_launchdaemons suspicious_memory conclusion
   matches="$(count_matching_files)"
   defaults_state="$(defaults_status)"
   launchdaemon_state="$(launchdaemon_status)"
   active_hooks="$(active_hook_count)"
   suspicious_hooks="$(suspicious_hook_count)"
   suspicious_launchdaemons="$(suspicious_launchdaemon_count)"
+  suspicious_memory="$(suspicious_memory_process_count)"
 
-  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$suspicious_launchdaemons" -eq 0 && "$suspicious_hooks" -eq 0 ]]; then
+  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$suspicious_launchdaemons" -eq 0 && "$suspicious_memory" -eq 0 && "$suspicious_hooks" -eq 0 ]]; then
     conclusion="clean"
   else
     conclusion="attention required"
@@ -266,6 +380,7 @@ print_summary() {
     printf '  Matching persistence indicators: %s\n' "$matches"
     printf '  defaults invelc: %s\n' "$defaults_state"
     printf '  Suspicious LaunchDaemons: %s (%s)\n' "$suspicious_launchdaemons" "$launchdaemon_state"
+    printf '  Suspicious memory processes: %s\n' "$suspicious_memory"
     printf '  Active non-sample Git hooks: %s\n' "$active_hooks"
     printf '  Suspicious Git hooks: %s\n' "$suspicious_hooks"
     printf '  Report: %s\n' "$REPORT"
@@ -298,11 +413,20 @@ run_clean() {
   log "Incident directory: $INCIDENT_DIR"
   log "System cleanup enabled: $SYSTEM_CLEANUP"
 
+  if [[ "$SKIP_XCODE_PROCESS_CHECK" != "true" ]] && pgrep -x Xcode >/dev/null 2>&1; then
+    log "ERROR: Xcode is running. Quit Xcode without saving the contaminated XYDevTool project, then retry cleanup."
+    return 1
+  fi
+
   backup_file "$ZSHRC" "zshrc.before"
   backup_file "$XY_PROJECT" "XYDevTool.project.pbxproj.before"
   snapshot_command "matching files before" matching_files
   snapshot_command "defaults read invelc before" defaults read invelc
   snapshot_processes
+
+  if [[ "$SKIP_PROCESS_CLEANUP" != "true" ]]; then
+    clean_suspicious_memory_processes
+  fi
 
   if [[ -f "$ZSHRC" ]]; then
     local tmp
@@ -331,13 +455,6 @@ run_clean() {
       log "Restored Software Update rapid/security response preference values to true."
     fi
 
-    if [[ "$SKIP_PROCESS_CLEANUP" != "true" ]]; then
-      while IFS= read -r pid; do
-        [[ -n "$pid" ]] || continue
-        sudo kill -9 "$pid" >/dev/null 2>&1 || true
-        log "Killed matching process PID $pid"
-      done < <(pgrep -f "$PROCESS_PATTERN" || true)
-    fi
   else
     log "Skipped system cleanup. Re-run with: ./cleanup_security_incident.sh clean --system"
   fi
@@ -345,16 +462,7 @@ run_clean() {
   clean_suspicious_git_hooks
 
   if [[ -f "$XY_PROJECT" ]]; then
-    local tmp
-    tmp="$(mktemp)"
-    awk '
-      /A3DC1C3 = "\(\(/ { next }
-      /AF17F99 = "\(\(/ { next }
-      { print }
-    ' "$XY_PROJECT" > "$tmp"
-    cat "$tmp" > "$XY_PROJECT"
-    rm -f "$tmp"
-    log "Removed malicious Xcode build settings A3DC1C3 and AF17F99 from $XY_PROJECT"
+    clean_malicious_xcode_project "$XY_PROJECT"
   fi
 
   snapshot_command "matching files after" matching_files
