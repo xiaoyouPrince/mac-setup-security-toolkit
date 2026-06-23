@@ -8,7 +8,7 @@ Confirmed malicious or suspicious artifacts:
 
 - `~/.zshrc` line reading `defaults read invelc ... | base64 --decode | sh`.
 - `defaults` domain `invelc`, storing base64 payloads.
-- `/Library/LaunchDaemons/com.google.rqbcle.plist`, running a root-level daemon.
+- `/Library/LaunchDaemons/com.google.rqbcle.plist`, running a root-level daemon. A later recurrence used the randomized label `com.google.eyibof` with the same Base64-to-shell persistence shape.
 - `~/Documents/GitHub/XYDevTool/.git/hooks/pre-commit`, executing a remote script fetched from `netcdnamz.ru`.
 - `~/Documents/GitHub/XYDevTool/XYDevTool/XYDevTool.xcodeproj/project.pbxproj`, containing malicious build settings `A3DC1C3` and `AF17F99`.
 
@@ -47,6 +47,8 @@ LaunchDaemon decoded behavior included disabling some Software Update security r
 - `2026-06-18 23:33:40`: `.zshrc.bak` still contained the malicious line.
 - `2026-06-19 00:46:10`: malicious Git hook was quarantined once.
 - `2026-06-19 00:54:46`: malicious Git hook was recreated, indicating active persistence was still present.
+- `2026-06-23 11:43:15`: a malicious hook was found in the security toolkit repository itself.
+- `2026-06-23`: `/Library/LaunchDaemons/com.google.eyibof.plist` was found registered with `KeepAlive`; this showed that filename-specific cleanup was insufficient.
 
 The exact writer process cannot be proven from current logs, but evidence points to a contaminated Xcode project or remote payload installing shell and launchd persistence.
 
@@ -63,8 +65,10 @@ The helper script is reusable and now has explicit modes:
 Modes:
 
 - `check`: read-only scan. Does not modify files and does not require sudo.
-- `clean`: backs up and removes known user/project persistence: `~/.zshrc` payload, `defaults invelc`, malicious `XYDevTool` Git hook, and malicious Xcode project build settings.
-- `clean --system`: also unloads/removes the known system LaunchDaemon and restores Software Update security response preference values. Requires sudo.
+- `clean`: backs up and removes known user/project persistence, quarantines all suspicious Git hooks found under the standard scan roots, and removes malicious Xcode project build settings.
+- `clean --system`: also finds, backs up, unloads, and removes system LaunchDaemons matching known payload traits, then restores Software Update security response preference values. Requires sudo.
+
+Every check and cleanup run ends with a fresh scan. If any suspicious indicator remains, the script reports `attention required` and returns a non-zero exit status.
 
 The script writes a new `logs/security-incidents/security_incident_*/cleanup_report.txt` on every run.
 
@@ -75,10 +79,10 @@ The cleanup script is designed to:
 - Backs up affected files into `logs/security-incidents/security_incident_*/backups/`.
 - Removes the malicious line from `~/.zshrc`.
 - Deletes the `defaults` domain `invelc`.
-- Unloads and removes `/Library/LaunchDaemons/com.google.rqbcle.plist`.
+- Finds suspicious LaunchDaemons by payload traits rather than a fixed filename, then backs up, unloads, and removes every match.
 - Restores Software Update rapid/security response preference values to `true`.
 - Kills matching suspicious processes.
-- Removes the malicious `XYDevTool/.git/hooks/pre-commit`.
+- Quarantines and removes every suspicious Git hook returned by `scan_git_hooks.sh`.
 - Removes malicious Xcode build settings `A3DC1C3` and `AF17F99`.
 - Writes a detailed cleanup report to `logs/security-incidents/security_incident_*/cleanup_report.txt`.
 
@@ -139,7 +143,7 @@ rg -n "base64 --decode|xxd -p -r|curl .*\\| sh|amzndev|netcdn|rigacdn|netcdnamz"
 
 Treat any remote download piped into `sh`, especially from the domains above, as malicious.
 
-## Final Verification
+## 2026-06-19 Verification (Historical)
 
 Completed after local sudo cleanup:
 
@@ -148,6 +152,14 @@ Completed after local sudo cleanup:
 - `defaults read invelc` returns no domain.
 - Shell startup files, LaunchAgents/LaunchDaemons, and `XYDevTool` no longer match known malicious patterns in the final scan.
 - Final Git hook scan `git_hook_scan_20260619_012553`: `Suspicious executable hook count: 0`.
+
+## 2026-06-23 Follow-up
+
+The later `com.google.eyibof` LaunchDaemon and toolkit repository hook demonstrated that a clean result based only on fixed artifact paths was not sufficient. The reusable cleanup now:
+
+- consumes the full suspicious Hook scan result instead of deleting only the XYDevTool Hook;
+- detects randomized LaunchDaemon names from payload structure;
+- re-scans after cleanup and returns failure while any suspicious indicator remains.
 
 Recommended periodic local check:
 

@@ -105,7 +105,7 @@ run_security_incident_clean_user() {
 }
 
 run_security_incident_clean_system() {
-  if confirm "This may ask for sudo and remove known system LaunchDaemon persistence. Continue?"; then
+  if confirm "This may ask for sudo and remove system LaunchDaemons matching known malicious payload traits. Continue?"; then
     run_script "cleanup_security_incident.sh" clean --system
   fi
 }
@@ -270,11 +270,12 @@ Action guide
 9) Security incident check (read-only)
    Script: cleanup_security_incident.sh check
    What it does:
-     - Checks shell startup files, defaults invelc, known LaunchDaemon registration,
+     - Checks shell startup files, defaults invelc, suspicious LaunchDaemon payload traits,
        matching process names when process enumeration is available, Git hooks,
        and the known XYDevTool Xcode project indicators.
      - Prints a terminal summary with the overall conclusion.
      - Writes a timestamped logs/security-incidents/security_incident_*/cleanup_report.txt.
+     - Returns a non-zero status when suspicious indicators remain.
    Existing installs:
      - Read-only. It does not delete or modify anything.
 
@@ -284,8 +285,9 @@ Action guide
      - Backs up affected files into logs/security-incidents/security_incident_*/backups/.
      - Removes known malicious ~/.zshrc payload lines.
      - Deletes defaults domain invelc.
-     - Removes the known malicious XYDevTool Git hook.
+     - Scans Documents/Desktop/Downloads and quarantines every suspicious Git hook.
      - Removes known malicious Xcode build settings A3DC1C3 and AF17F99.
+     - Re-scans after cleanup and returns a non-zero status if indicators remain.
    Safety:
      - This modifies user/project files. start.sh asks for confirmation first.
      - It does not run sudo and does not modify /Library.
@@ -294,10 +296,12 @@ Action guide
    Script: cleanup_security_incident.sh clean --system
    What it does:
      - Performs everything in option 10.
-     - Unloads/removes /Library/LaunchDaemons/com.google.rqbcle.plist when present.
+     - Finds LaunchDaemons by known IOC plus shell-execution traits, or by an
+       obfuscated Base64-to-shell payload shape, instead of relying on one filename.
+     - Backs up, unloads, and removes every matching LaunchDaemon.
      - Restores Software Update rapid/security response preference values.
      - Attempts to kill matching suspicious processes.
-     - Prints a terminal summary after cleanup.
+     - Re-scans after cleanup and fails when suspicious indicators remain.
    Safety:
      - This may ask for sudo in your terminal.
      - Type your password only into the terminal prompt, never into chat.

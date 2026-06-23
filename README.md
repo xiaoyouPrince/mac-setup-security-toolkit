@@ -344,27 +344,23 @@ Clean user and project artifacts:
 ./cleanup_security_incident.sh clean
 ```
 
+This mode also runs the Git hook scanner in apply mode. Every suspicious non-sample hook under `~/Documents`, `~/Desktop`, and `~/Downloads` is copied into the incident report quarantine directory before removal. Cleanup is driven by scan results rather than a single repository path.
+
 Clean user, project, and system artifacts:
 
 ```bash
 ./cleanup_security_incident.sh clean --system
 ```
 
-The system cleanup mode may request `sudo` and can remove the known LaunchDaemon:
+The system cleanup mode may request `sudo`. It scans `/Library/LaunchDaemons` and identifies malicious persistence using known IOC plus shell-execution traits, or a long Base64 payload decoded directly into a shell. Matching plist files are backed up, unloaded by their parsed `Label`, and removed. Detection does not depend on a fixed plist filename. The mode also restores Software Update rapid/security response preference values.
 
-```text
-/Library/LaunchDaemons/com.google.rqbcle.plist
-```
-
-It also restores Software Update rapid/security response preference values.
-
-The check and cleanup modes print a terminal summary with the overall conclusion, matching indicator count, `defaults invelc` status, LaunchDaemon status, active hook count, suspicious hook count, and report path.
+The check and cleanup modes print a terminal summary with the overall conclusion, matching indicator count, `defaults invelc` status, suspicious LaunchDaemon count, active hook count, suspicious hook count, and report path. Both modes return a non-zero exit status while suspicious indicators remain. Cleanup always re-scans before deciding its final status.
 
 The check mode is intended for periodic use. It examines:
 
 - shell startup files
 - `defaults invelc`
-- known LaunchDaemon registration
+- suspicious LaunchDaemon payload traits
 - matching process names when process enumeration is available
 - Git hooks
 - known Xcode project indicators

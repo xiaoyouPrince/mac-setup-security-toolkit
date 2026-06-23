@@ -19,12 +19,12 @@ Usage:
 
   ./cleanup_security_incident.sh clean
       Back up and remove known user/project persistence:
-      ~/.zshrc payload, defaults domain invelc, XYDevTool hook, and
-      malicious Xcode project build settings.
+      ~/.zshrc payload, defaults domain invelc, all suspicious Git hooks,
+      and malicious Xcode project build settings.
 
   ./cleanup_security_incident.sh clean --system
-      Also unload/remove the known system LaunchDaemon and restore
-      Software Update security response preference values. Requires sudo.
+      Also unload/remove system LaunchDaemons matching known payload traits,
+      then restore Software Update security response preferences. Requires sudo.
 EOF
     exit 2
     ;;
@@ -34,10 +34,15 @@ INCIDENT_ROOT="${INCIDENT_ROOT:-$SCRIPT_DIR/logs/security-incidents}"
 INCIDENT_DIR="${INCIDENT_DIR:-$INCIDENT_ROOT/security_incident_$(date +%Y%m%d_%H%M%S)}"
 REPORT="$INCIDENT_DIR/cleanup_report.txt"
 ZSHRC="$HOME/.zshrc"
-LAUNCHD_PLIST="/Library/LaunchDaemons/com.google.rqbcle.plist"
 XY_REPO="$HOME/Documents/GitHub/XYDevTool"
-XY_HOOK="$XY_REPO/.git/hooks/pre-commit"
 XY_PROJECT="$XY_REPO/XYDevTool/XYDevTool.xcodeproj/project.pbxproj"
+SCAN_GIT_HOOKS_SCRIPT="${SCAN_GIT_HOOKS_SCRIPT:-$SCRIPT_DIR/scan_git_hooks.sh}"
+SYSTEM_LAUNCH_DAEMON_DIR="${SYSTEM_LAUNCH_DAEMON_DIR:-/Library/LaunchDaemons}"
+SYSTEM_LAUNCH_AGENT_DIR="${SYSTEM_LAUNCH_AGENT_DIR:-/Library/LaunchAgents}"
+USER_LAUNCH_AGENT_DIR="${USER_LAUNCH_AGENT_DIR:-$HOME/Library/LaunchAgents}"
+SKIP_SYSTEM_PREFERENCE_RESTORE="${SKIP_SYSTEM_PREFERENCE_RESTORE:-false}"
+SKIP_PROCESS_CLEANUP="${SKIP_PROCESS_CLEANUP:-false}"
+SKIP_USER_DEFAULTS="${SKIP_USER_DEFAULTS:-false}"
 SHELL_FILES=(
   "$HOME/.zshrc"
   "$HOME/.zprofile"
@@ -47,12 +52,15 @@ SHELL_FILES=(
   "$HOME/.bash_profile"
 )
 PERSISTENCE_PATHS=(
-  /Library/LaunchDaemons
-  /Library/LaunchAgents
-  "$HOME/Library/LaunchAgents"
+  "$SYSTEM_LAUNCH_DAEMON_DIR"
+  "$SYSTEM_LAUNCH_AGENT_DIR"
+  "$USER_LAUNCH_AGENT_DIR"
 )
 PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p='
 PROCESS_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|com.google.rqbcle|CloudTelemetryService'
+LAUNCHD_IOC_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|CloudTelemetryService'
+LAUNCHD_EXEC_PATTERN='base64[[:space:]]+--decode|xxd[[:space:]]+-p[[:space:]]+-r|curl .*\|[[:space:]]*(ba)?sh|defaults[[:space:]]+read.*\|.*(ba)?sh'
+LAUNCHD_OBFUSCATED_EXEC_PATTERN='echo[[:space:]]+[A-Za-z0-9+/=]{32,}.*\|[[:space:]]*base64[[:space:]]+--decode[[:space:]]*\|[[:space:]]*(ba)?sh'
 
 mkdir -p "$INCIDENT_DIR/backups"
 : > "$REPORT"
@@ -106,10 +114,93 @@ matching_files() {
 }
 
 check_git_hooks() {
-  if [[ -x "$SCRIPT_DIR/scan_git_hooks.sh" ]]; then
-    bash "$SCRIPT_DIR/scan_git_hooks.sh"
+  if [[ -f "$SCAN_GIT_HOOKS_SCRIPT" ]]; then
+    bash "$SCAN_GIT_HOOKS_SCRIPT"
   else
     find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print 2>/dev/null || true
+  fi
+}
+
+is_suspicious_launchdaemon() {
+  local plist="$1"
+  [[ -f "$plist" ]] || return 1
+  if rg -q -i "$LAUNCHD_IOC_PATTERN" "$plist" 2>/dev/null &&
+    rg -q -i "$LAUNCHD_EXEC_PATTERN" "$plist" 2>/dev/null; then
+    return 0
+  fi
+  rg -q -i "$LAUNCHD_OBFUSCATED_EXEC_PATTERN" "$plist" 2>/dev/null
+}
+
+find_suspicious_launchdaemons() {
+  local plist
+  [[ -d "$SYSTEM_LAUNCH_DAEMON_DIR" ]] || return 0
+  while IFS= read -r -d '' plist; do
+    if is_suspicious_launchdaemon "$plist"; then
+      printf '%s\n' "$plist"
+    fi
+  done < <(find "$SYSTEM_LAUNCH_DAEMON_DIR" -maxdepth 1 -type f -name '*.plist' -print0 2>/dev/null)
+}
+
+suspicious_launchdaemon_count() {
+  find_suspicious_launchdaemons | awk 'NF { count++ } END { print count + 0 }'
+}
+
+launchdaemon_label() {
+  local plist="$1"
+  local label=""
+  label="$(plutil -extract Label raw -o - "$plist" 2>/dev/null || true)"
+  if [[ -n "$label" ]]; then
+    printf '%s' "$label"
+  else
+    basename "$plist" .plist
+  fi
+}
+
+clean_suspicious_launchdaemons() {
+  local list="$INCIDENT_DIR/suspicious_launchdaemons.txt"
+  local plist label backup
+  find_suspicious_launchdaemons > "$list"
+
+  if [[ ! -s "$list" ]]; then
+    log "No suspicious system LaunchDaemons found."
+    return 0
+  fi
+
+  while IFS= read -r plist; do
+    [[ -n "$plist" && -f "$plist" ]] || continue
+    label="$(launchdaemon_label "$plist")"
+    backup="$INCIDENT_DIR/backups/launchdaemon-$(basename "$plist").before"
+    cp -p "$plist" "$backup"
+    log "Backed up $plist -> $backup"
+
+    if [[ "$SYSTEM_LAUNCH_DAEMON_DIR" == "/Library/LaunchDaemons" ]]; then
+      sudo launchctl bootout system "$plist" >/dev/null 2>&1 ||
+        sudo launchctl bootout "system/$label" >/dev/null 2>&1 || true
+      sudo rm -f "$plist"
+    else
+      rm -f "$plist"
+    fi
+
+    if [[ -e "$plist" || -L "$plist" ]]; then
+      log "ERROR: failed to remove suspicious LaunchDaemon: $plist"
+    else
+      log "Removed suspicious LaunchDaemon: $plist (label: $label)"
+    fi
+  done < "$list"
+}
+
+clean_suspicious_git_hooks() {
+  local report_dir="$INCIDENT_DIR/git-hooks-cleanup"
+  if [[ ! -f "$SCAN_GIT_HOOKS_SCRIPT" ]]; then
+    log "ERROR: Git hook cleanup helper not found: $SCAN_GIT_HOOKS_SCRIPT"
+    return 1
+  fi
+
+  if bash "$SCAN_GIT_HOOKS_SCRIPT" --apply --report-dir "$report_dir" >> "$REPORT" 2>&1; then
+    log "Scanned and quarantined all suspicious Git hooks. Details: $report_dir"
+  else
+    log "ERROR: suspicious Git hook cleanup failed. Details: $report_dir"
+    return 1
   fi
 }
 
@@ -118,6 +209,10 @@ count_matching_files() {
 }
 
 defaults_status() {
+  if [[ "$SKIP_USER_DEFAULTS" == "true" ]]; then
+    printf 'absent'
+    return 0
+  fi
   if defaults read invelc >/dev/null 2>&1; then
     printf 'present'
   else
@@ -126,7 +221,7 @@ defaults_status() {
 }
 
 launchdaemon_status() {
-  if [[ -e "$LAUNCHD_PLIST" || -L "$LAUNCHD_PLIST" ]] || launchctl print system/com.google.rqbcle >/dev/null 2>&1; then
+  if [[ "$(suspicious_launchdaemon_count)" -gt 0 ]]; then
     printf 'present'
   else
     printf 'absent'
@@ -151,14 +246,15 @@ suspicious_hook_count() {
 
 print_summary() {
   local phase="$1"
-  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks conclusion
+  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks suspicious_launchdaemons conclusion
   matches="$(count_matching_files)"
   defaults_state="$(defaults_status)"
   launchdaemon_state="$(launchdaemon_status)"
   active_hooks="$(active_hook_count)"
   suspicious_hooks="$(suspicious_hook_count)"
+  suspicious_launchdaemons="$(suspicious_launchdaemon_count)"
 
-  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$launchdaemon_state" == "absent" && "$suspicious_hooks" -eq 0 ]]; then
+  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$suspicious_launchdaemons" -eq 0 && "$suspicious_hooks" -eq 0 ]]; then
     conclusion="clean"
   else
     conclusion="attention required"
@@ -169,11 +265,13 @@ print_summary() {
     printf '  Conclusion: %s\n' "$conclusion"
     printf '  Matching persistence indicators: %s\n' "$matches"
     printf '  defaults invelc: %s\n' "$defaults_state"
-    printf '  com.google.rqbcle LaunchDaemon: %s\n' "$launchdaemon_state"
+    printf '  Suspicious LaunchDaemons: %s (%s)\n' "$suspicious_launchdaemons" "$launchdaemon_state"
     printf '  Active non-sample Git hooks: %s\n' "$active_hooks"
     printf '  Suspicious Git hooks: %s\n' "$suspicious_hooks"
     printf '  Report: %s\n' "$REPORT"
   } | tee -a "$REPORT"
+
+  [[ "$conclusion" == "clean" ]]
 }
 
 run_check() {
@@ -182,14 +280,17 @@ run_check() {
 
   snapshot_command "matching files" matching_files
   snapshot_command "defaults read invelc" defaults read invelc
-  snapshot_command "LaunchDaemon file" ls -l "$LAUNCHD_PLIST"
-  snapshot_command "LaunchDaemon registration" launchctl print system/com.google.rqbcle
+  snapshot_command "suspicious LaunchDaemons" find_suspicious_launchdaemons
   snapshot_processes
   snapshot_command "Git hook scan" check_git_hooks
 
   log "Security check finished."
-  print_summary "check"
-  log "Review report: $REPORT"
+  if print_summary "check"; then
+    log "Review report: $REPORT"
+  else
+    log "ERROR: security indicators remain. Review report: $REPORT"
+    return 1
+  fi
 }
 
 run_clean() {
@@ -198,8 +299,6 @@ run_clean() {
   log "System cleanup enabled: $SYSTEM_CLEANUP"
 
   backup_file "$ZSHRC" "zshrc.before"
-  backup_file "$LAUNCHD_PLIST" "com.google.rqbcle.plist.before"
-  backup_file "$XY_HOOK" "XYDevTool.git-hooks-pre-commit.before"
   backup_file "$XY_PROJECT" "XYDevTool.project.pbxproj.before"
   snapshot_command "matching files before" matching_files
   snapshot_command "defaults read invelc before" defaults read invelc
@@ -214,43 +313,36 @@ run_clean() {
     log "Removed malicious startup line from $ZSHRC"
   fi
 
-  if defaults read invelc >/dev/null 2>&1; then
-    defaults delete invelc || true
-    log "Deleted user defaults domain: invelc"
-  else
-    log "User defaults domain not present: invelc"
+  if [[ "$SKIP_USER_DEFAULTS" != "true" ]]; then
+    if defaults read invelc >/dev/null 2>&1; then
+      defaults delete invelc || true
+      log "Deleted user defaults domain: invelc"
+    else
+      log "User defaults domain not present: invelc"
+    fi
   fi
 
   if [[ "$SYSTEM_CLEANUP" == "true" ]]; then
-    if [[ -f "$LAUNCHD_PLIST" ]]; then
-      sudo launchctl bootout system "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
-      sudo rm -f "$LAUNCHD_PLIST"
-      log "Unloaded and removed $LAUNCHD_PLIST"
-    else
-      log "System LaunchDaemon not present: $LAUNCHD_PLIST"
+    clean_suspicious_launchdaemons
+
+    if [[ "$SKIP_SYSTEM_PREFERENCE_RESTORE" != "true" ]]; then
+      sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate.plist ConfigDataInstall -bool true || true
+      sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate.plist AllowRapidSecurityResponses -bool true || true
+      log "Restored Software Update rapid/security response preference values to true."
     fi
 
-    sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate.plist ConfigDataInstall -bool true || true
-    sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate.plist AllowRapidSecurityResponses -bool true || true
-    log "Restored Software Update rapid/security response preference values to true."
-
-    while IFS= read -r pid; do
-      [[ -n "$pid" ]] || continue
-      sudo kill -9 "$pid" >/dev/null 2>&1 || true
-      log "Killed matching process PID $pid"
-    done < <(pgrep -f "$PROCESS_PATTERN" || true)
+    if [[ "$SKIP_PROCESS_CLEANUP" != "true" ]]; then
+      while IFS= read -r pid; do
+        [[ -n "$pid" ]] || continue
+        sudo kill -9 "$pid" >/dev/null 2>&1 || true
+        log "Killed matching process PID $pid"
+      done < <(pgrep -f "$PROCESS_PATTERN" || true)
+    fi
   else
     log "Skipped system cleanup. Re-run with: ./cleanup_security_incident.sh clean --system"
   fi
 
-  if [[ -f "$XY_HOOK" ]]; then
-    if rg -q -i "$PATTERN" "$XY_HOOK" 2>/dev/null; then
-      rm -f "$XY_HOOK"
-      log "Removed malicious Git hook: $XY_HOOK"
-    else
-      log "Git hook exists but did not match malicious pattern: $XY_HOOK"
-    fi
-  fi
+  clean_suspicious_git_hooks
 
   if [[ -f "$XY_PROJECT" ]]; then
     local tmp
@@ -267,14 +359,17 @@ run_clean() {
 
   snapshot_command "matching files after" matching_files
   snapshot_command "defaults read invelc after" defaults read invelc
-  snapshot_command "LaunchDaemon file after" ls -l "$LAUNCHD_PLIST"
-  snapshot_command "LaunchDaemon registration after" launchctl print system/com.google.rqbcle
+  snapshot_command "suspicious LaunchDaemons after" find_suspicious_launchdaemons
   snapshot_processes
   snapshot_command "Git hook scan after" check_git_hooks
 
   log "Security cleanup finished."
-  print_summary "cleanup"
-  log "Review report: $REPORT"
+  if print_summary "cleanup"; then
+    log "Cleanup verification passed. Review report: $REPORT"
+  else
+    log "ERROR: cleanup verification failed because suspicious indicators remain. Review report: $REPORT"
+    return 1
+  fi
 }
 
 if [[ "$MODE" == "check" ]]; then
