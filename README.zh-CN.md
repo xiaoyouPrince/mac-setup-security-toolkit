@@ -348,7 +348,7 @@ quarantined_hooks/
 
 该模式还会检测后续事件中确认的内存载荷形态：从短 `/tmp` 脚本启动且携带长加密参数的 `osascript`、使用相同参数结构的 `/tmp` 原生可执行文件，以及会自删除的 `/private/tmp/m.app` applet。脚本会先记录并终止命中进程，再清理文件。执行清理前必须关闭 Xcode；否则脚本会停止，防止 Xcode 将内存中的旧工程状态重新写回。
 
-针对 XYDevTool，清理会删除执行 `${A3DC1C3}` 的完整 Shell Build Phase，而不只是删除 `A3DC1C3` 和 `AF17F99` 的变量值。
+清理会对 `~/Documents`、`~/Desktop` 和 `~/Downloads` 下发现的每个 `project.pbxproj` 执行相同的恶意特征检查。每个命中工程都会单独备份，然后删除执行 `${A3DC1C3}` 的完整 Shell Build Phase 以及 `A3DC1C3`/`AF17F99` 变量值，不对任何单一仓库做特殊处理。
 
 清理用户、项目和系统文件：
 
@@ -367,7 +367,7 @@ quarantined_hooks/
 - 可疑 LaunchDaemon 载荷特征
 - 自删除的临时 AppleScript/原生进程形态
 - Git Hook
-- 已知 Xcode 项目特征
+- 所有已发现 Xcode 项目中的已知恶意特征
 
 部分受限终端环境可能不允许枚举进程。文件、defaults、launchd、Git Hook 和 Xcode 项目检查是主要判断依据。
 

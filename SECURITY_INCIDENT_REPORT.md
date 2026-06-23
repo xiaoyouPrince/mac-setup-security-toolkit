@@ -157,7 +157,7 @@ Completed after local sudo cleanup:
 
 The later `com.google.eyibof` LaunchDaemon and toolkit repository hook demonstrated that a clean result based only on fixed artifact paths was not sufficient. The reusable cleanup now:
 
-- consumes the full suspicious Hook scan result instead of deleting only the XYDevTool Hook;
+- consumes the full suspicious Hook scan result instead of deleting a Hook from only one repository;
 - detects randomized LaunchDaemon names from payload structure;
 - re-scans after cleanup and returns failure while any suspicious indicator remains.
 

@@ -348,7 +348,7 @@ This mode also runs the Git hook scanner in apply mode. Every suspicious non-sam
 
 It also detects memory-resident payload shapes observed during the follow-up incident: `osascript` launched from a short `/tmp` script with a long encrypted argument, native `/tmp` executables using the same argument shape, and the self-deleting `/private/tmp/m.app` applet. Matching processes are recorded and terminated before file cleanup. Xcode must be closed before cleanup; otherwise the script stops to prevent stale in-memory project state from restoring the contaminated project file.
 
-For XYDevTool, cleanup removes the complete shell build phase that evaluates `${A3DC1C3}`, not only the `A3DC1C3` and `AF17F99` values.
+For every `project.pbxproj` discovered under `~/Documents`, `~/Desktop`, and `~/Downloads`, cleanup checks the same malicious traits. Each affected project is backed up separately before cleanup removes the complete shell build phase that evaluates `${A3DC1C3}` and the `A3DC1C3`/`AF17F99` values. No repository receives special-case handling.
 
 Clean user, project, and system artifacts:
 
@@ -367,7 +367,7 @@ The check mode is intended for periodic use. It examines:
 - suspicious LaunchDaemon payload traits
 - self-deleting temporary AppleScript/native process shapes
 - Git hooks
-- known Xcode project indicators
+- known malicious indicators across all discovered Xcode projects
 
 Process enumeration can be unavailable in restricted terminal contexts. The file, defaults, launchd, Git hook, and Xcode project checks are the primary signals.
 

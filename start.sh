@@ -272,7 +272,7 @@ Action guide
    What it does:
      - Checks shell startup files, defaults invelc, suspicious LaunchDaemon payload traits,
        self-deleting temporary AppleScript/native processes, Git hooks,
-       and the known XYDevTool Xcode project indicators.
+       and known malicious indicators in every discovered Xcode project.
      - Prints a terminal summary with the overall conclusion.
      - Writes a timestamped logs/security-incidents/security_incident_*/cleanup_report.txt.
      - Returns a non-zero status when suspicious indicators remain.
@@ -287,8 +287,9 @@ Action guide
      - Deletes defaults domain invelc.
      - Scans Documents/Desktop/Downloads and quarantines every suspicious Git hook.
      - Terminates known /tmp AppleScript/native memory payload shapes.
-     - Removes the complete Xcode shell build phase that loads A3DC1C3, plus
-       malicious build settings A3DC1C3 and AF17F99.
+     - Scans every project.pbxproj under Documents/Desktop/Downloads.
+     - Separately backs up each affected project, then removes the complete Xcode
+       shell build phase that loads A3DC1C3 and the A3DC1C3/AF17F99 settings.
      - Re-scans after cleanup and returns a non-zero status if indicators remain.
    Safety:
      - This modifies user/project files. start.sh asks for confirmation first.

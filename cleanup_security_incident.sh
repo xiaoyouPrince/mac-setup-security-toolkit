@@ -34,8 +34,6 @@ INCIDENT_ROOT="${INCIDENT_ROOT:-$SCRIPT_DIR/logs/security-incidents}"
 INCIDENT_DIR="${INCIDENT_DIR:-$INCIDENT_ROOT/security_incident_$(date +%Y%m%d_%H%M%S)}"
 REPORT="$INCIDENT_DIR/cleanup_report.txt"
 ZSHRC="$HOME/.zshrc"
-XY_REPO="$HOME/Documents/GitHub/XYDevTool"
-XY_PROJECT="$XY_REPO/XYDevTool/XYDevTool.xcodeproj/project.pbxproj"
 SCAN_GIT_HOOKS_SCRIPT="${SCAN_GIT_HOOKS_SCRIPT:-$SCRIPT_DIR/scan_git_hooks.sh}"
 SYSTEM_LAUNCH_DAEMON_DIR="${SYSTEM_LAUNCH_DAEMON_DIR:-/Library/LaunchDaemons}"
 SYSTEM_LAUNCH_AGENT_DIR="${SYSTEM_LAUNCH_AGENT_DIR:-/Library/LaunchAgents}"
@@ -57,7 +55,13 @@ PERSISTENCE_PATHS=(
   "$SYSTEM_LAUNCH_AGENT_DIR"
   "$USER_LAUNCH_AGENT_DIR"
 )
+SCAN_ROOTS=(
+  "$HOME/Documents"
+  "$HOME/Desktop"
+  "$HOME/Downloads"
+)
 PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p=|A3DC1C3|AF17F99'
+XCODE_PATTERN='A3DC1C3|AF17F99|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p='
 PROCESS_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|com.google.rqbcle|CloudTelemetryService'
 LAUNCHD_IOC_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|CloudTelemetryService'
 LAUNCHD_EXEC_PATTERN='base64[[:space:]]+--decode|xxd[[:space:]]+-p[[:space:]]+-r|curl .*\|[[:space:]]*(ba)?sh|defaults[[:space:]]+read.*\|.*(ba)?sh'
@@ -158,23 +162,67 @@ clean_suspicious_memory_processes() {
 
 matching_files() {
   local paths=()
-  local path
-  for path in "${SHELL_FILES[@]}" "${PERSISTENCE_PATHS[@]}" "$XY_REPO"; do
+  local path project
+  for path in "${SHELL_FILES[@]}" "${PERSISTENCE_PATHS[@]}"; do
     [[ -e "$path" ]] && paths+=("$path")
   done
 
-  if [[ "${#paths[@]}" -eq 0 ]]; then
-    return 0
+  if [[ "${#paths[@]}" -gt 0 ]]; then
+    rg -n -i "$PATTERN" "${paths[@]}" 2>/dev/null || true
   fi
 
-  rg -n -i "$PATTERN" "${paths[@]}" 2>/dev/null || true
+  while IFS= read -r project; do
+    [[ -f "$project" ]] || continue
+    rg -n -i "$XCODE_PATTERN" "$project" 2>/dev/null || true
+  done < <(find_xcode_projects)
+}
+
+find_xcode_projects() {
+  local root project
+  for root in "${SCAN_ROOTS[@]}"; do
+    [[ -d "$root" ]] || continue
+    while IFS= read -r -d '' project; do
+      printf '%s\n' "$project"
+    done < <(
+      find "$root" \
+        -path '*malware-cleanup-backup-*' -prune -o \
+        -path '*malware_quarantine_*' -prune -o \
+        -path '*git_hook_scan_*' -prune -o \
+        -path '*security_incident_*' -prune -o \
+        -name project.pbxproj -type f -print0 2>/dev/null
+    )
+  done | sort -u
+}
+
+find_suspicious_xcode_projects() {
+  local project
+  while IFS= read -r project; do
+    [[ -f "$project" ]] || continue
+    if rg -q -i "$XCODE_PATTERN" "$project" 2>/dev/null; then
+      printf '%s\n' "$project"
+    fi
+  done < <(find_xcode_projects)
+}
+
+suspicious_xcode_project_count() {
+  find_suspicious_xcode_projects | awk 'NF { count++ } END { print count + 0 }'
+}
+
+find_active_git_hooks() {
+  local root hook
+  for root in "${SCAN_ROOTS[@]}"; do
+    [[ -d "$root" ]] || continue
+    while IFS= read -r -d '' hook; do
+      printf '%s\n' "$hook"
+    done < <(find "$root" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print0 2>/dev/null)
+  done
 }
 
 check_git_hooks() {
   if [[ -f "$SCAN_GIT_HOOKS_SCRIPT" ]]; then
     bash "$SCAN_GIT_HOOKS_SCRIPT"
   else
-    find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print 2>/dev/null || true
+    find_active_git_hooks
   fi
 }
 
@@ -288,9 +336,10 @@ malicious_xcode_build_phase_ids() {
 
 clean_malicious_xcode_project() {
   local project="$1"
-  local ids="$INCIDENT_DIR/malicious_xcode_build_phase_ids.txt"
+  local ids
   local id tmp
 
+  ids="$(mktemp)"
   malicious_xcode_build_phase_ids "$project" > "$ids"
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
@@ -314,7 +363,33 @@ clean_malicious_xcode_project() {
   ' "$project" > "$tmp"
   cat "$tmp" > "$project"
   rm -f "$tmp"
+  rm -f "$ids"
   log "Removed malicious Xcode build settings A3DC1C3 and AF17F99 from $project"
+}
+
+safe_path_label() {
+  printf '%s' "$1" | sed 's#^/##; s#[/:]#_#g'
+}
+
+clean_suspicious_xcode_projects() {
+  local list="$INCIDENT_DIR/suspicious_xcode_projects.txt"
+  local project backup label
+  find_suspicious_xcode_projects > "$list"
+
+  if [[ ! -s "$list" ]]; then
+    log "No suspicious Xcode projects found."
+    return 0
+  fi
+
+  mkdir -p "$INCIDENT_DIR/backups/xcode-projects"
+  while IFS= read -r project; do
+    [[ -n "$project" && -f "$project" ]] || continue
+    label="$(safe_path_label "$project")"
+    backup="$INCIDENT_DIR/backups/xcode-projects/${label}.before"
+    cp -p "$project" "$backup"
+    log "Backed up $project -> $backup"
+    clean_malicious_xcode_project "$project"
+  done < "$list"
 }
 
 count_matching_files() {
@@ -342,7 +417,7 @@ launchdaemon_status() {
 }
 
 active_hook_count() {
-  find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print 2>/dev/null | wc -l | tr -d ' '
+  find_active_git_hooks | wc -l | tr -d ' '
 }
 
 suspicious_hook_count() {
@@ -353,13 +428,13 @@ suspicious_hook_count() {
     if rg -q -i "$PATTERN" "$hook" 2>/dev/null; then
       count=$((count + 1))
     fi
-  done < <(find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -path '*/.git/hooks/*' -type f ! -name '*.sample' -print 2>/dev/null)
+  done < <(find_active_git_hooks)
   printf '%s' "$count"
 }
 
 print_summary() {
   local phase="$1"
-  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks suspicious_launchdaemons suspicious_memory conclusion
+  local matches defaults_state launchdaemon_state active_hooks suspicious_hooks suspicious_launchdaemons suspicious_memory suspicious_xcode_projects conclusion
   matches="$(count_matching_files)"
   defaults_state="$(defaults_status)"
   launchdaemon_state="$(launchdaemon_status)"
@@ -367,6 +442,7 @@ print_summary() {
   suspicious_hooks="$(suspicious_hook_count)"
   suspicious_launchdaemons="$(suspicious_launchdaemon_count)"
   suspicious_memory="$(suspicious_memory_process_count)"
+  suspicious_xcode_projects="$(suspicious_xcode_project_count)"
 
   if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$suspicious_launchdaemons" -eq 0 && "$suspicious_memory" -eq 0 && "$suspicious_hooks" -eq 0 ]]; then
     conclusion="clean"
@@ -381,6 +457,7 @@ print_summary() {
     printf '  defaults invelc: %s\n' "$defaults_state"
     printf '  Suspicious LaunchDaemons: %s (%s)\n' "$suspicious_launchdaemons" "$launchdaemon_state"
     printf '  Suspicious memory processes: %s\n' "$suspicious_memory"
+    printf '  Suspicious Xcode projects: %s\n' "$suspicious_xcode_projects"
     printf '  Active non-sample Git hooks: %s\n' "$active_hooks"
     printf '  Suspicious Git hooks: %s\n' "$suspicious_hooks"
     printf '  Report: %s\n' "$REPORT"
@@ -396,6 +473,7 @@ run_check() {
   snapshot_command "matching files" matching_files
   snapshot_command "defaults read invelc" defaults read invelc
   snapshot_command "suspicious LaunchDaemons" find_suspicious_launchdaemons
+  snapshot_command "suspicious Xcode projects" find_suspicious_xcode_projects
   snapshot_processes
   snapshot_command "Git hook scan" check_git_hooks
 
@@ -414,13 +492,13 @@ run_clean() {
   log "System cleanup enabled: $SYSTEM_CLEANUP"
 
   if [[ "$SKIP_XCODE_PROCESS_CHECK" != "true" ]] && pgrep -x Xcode >/dev/null 2>&1; then
-    log "ERROR: Xcode is running. Quit Xcode without saving the contaminated XYDevTool project, then retry cleanup."
+    log "ERROR: Xcode is running. Quit Xcode without saving contaminated project files, then retry cleanup."
     return 1
   fi
 
   backup_file "$ZSHRC" "zshrc.before"
-  backup_file "$XY_PROJECT" "XYDevTool.project.pbxproj.before"
   snapshot_command "matching files before" matching_files
+  snapshot_command "suspicious Xcode projects before" find_suspicious_xcode_projects
   snapshot_command "defaults read invelc before" defaults read invelc
   snapshot_processes
 
@@ -461,13 +539,12 @@ run_clean() {
 
   clean_suspicious_git_hooks
 
-  if [[ -f "$XY_PROJECT" ]]; then
-    clean_malicious_xcode_project "$XY_PROJECT"
-  fi
+  clean_suspicious_xcode_projects
 
   snapshot_command "matching files after" matching_files
   snapshot_command "defaults read invelc after" defaults read invelc
   snapshot_command "suspicious LaunchDaemons after" find_suspicious_launchdaemons
+  snapshot_command "suspicious Xcode projects after" find_suspicious_xcode_projects
   snapshot_processes
   snapshot_command "Git hook scan after" check_git_hooks
 
