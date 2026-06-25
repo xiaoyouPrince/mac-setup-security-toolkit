@@ -289,7 +289,7 @@ Action guide
      - Terminates known /tmp AppleScript/native memory payload shapes.
      - Scans every project.pbxproj under Documents/Desktop/Downloads.
      - Separately backs up each affected project, then removes the complete Xcode
-       shell build phase that loads A3DC1C3 and the A3DC1C3/AF17F99 settings.
+       shell build phase/build rule that loads known malicious payloads and the A3DC1C3/AF17F99 settings.
      - Re-scans after cleanup and returns a non-zero status if indicators remain.
    Safety:
      - This modifies user/project files. start.sh asks for confirmation first.

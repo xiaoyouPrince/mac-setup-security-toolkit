@@ -309,22 +309,26 @@ clean_suspicious_git_hooks() {
   fi
 }
 
-malicious_xcode_build_phase_ids() {
+malicious_xcode_section_ids() {
   local project="$1"
-  awk '
-    /Begin PBXShellScriptBuildPhase section/ { in_section = 1; next }
-    /End PBXShellScriptBuildPhase section/ { in_section = 0; capturing = 0 }
+  local section="$2"
+  awk -v section="$section" '
+    function is_malicious(line) {
+      return index(line, "A3DC1C3")         || index(line, "AF17F99")         || index(line, "base64 --decode")         || index(line, "xxd -p -r")         || line ~ /curl .*\| sh/         || line ~ /curl .* -d \"p=/
+    }
+    $0 ~ "Begin " section " section" { in_section = 1; next }
+    $0 ~ "End " section " section" { in_section = 0; capturing = 0 }
     in_section && !capturing && /\/\*.*\*\/ = \{/ {
       line = $0
       sub(/^[ \t]*/, "", line)
       split(line, fields, " ")
       id = fields[1]
       capturing = 1
-      malicious = 0
+      malicious = is_malicious($0)
       next
     }
     in_section && capturing {
-      if ($0 ~ /A3DC1C3/) malicious = 1
+      if (is_malicious($0)) malicious = 1
       if ($0 ~ /^[ \t]*};/) {
         if (malicious) print id
         capturing = 0
@@ -334,13 +338,12 @@ malicious_xcode_build_phase_ids() {
   ' "$project"
 }
 
-clean_malicious_xcode_project() {
+remove_xcode_objects_by_id() {
   local project="$1"
-  local ids
+  local ids="$2"
+  local label="$3"
   local id tmp
 
-  ids="$(mktemp)"
-  malicious_xcode_build_phase_ids "$project" > "$ids"
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
     tmp="$(mktemp)"
@@ -352,8 +355,22 @@ clean_malicious_xcode_project() {
     ' "$project" > "$tmp"
     cat "$tmp" > "$project"
     rm -f "$tmp"
-    log "Removed malicious Xcode shell build phase: $id"
+    log "Removed malicious Xcode $label: $id"
   done < "$ids"
+}
+
+clean_malicious_xcode_project() {
+  local project="$1"
+  local phase_ids rule_ids
+  local tmp
+
+  phase_ids="$(mktemp)"
+  rule_ids="$(mktemp)"
+  malicious_xcode_section_ids "$project" "PBXShellScriptBuildPhase" > "$phase_ids"
+  malicious_xcode_section_ids "$project" "PBXBuildRule" > "$rule_ids"
+
+  remove_xcode_objects_by_id "$project" "$phase_ids" "shell build phase"
+  remove_xcode_objects_by_id "$project" "$rule_ids" "build rule"
 
   tmp="$(mktemp)"
   awk '
@@ -363,7 +380,7 @@ clean_malicious_xcode_project() {
   ' "$project" > "$tmp"
   cat "$tmp" > "$project"
   rm -f "$tmp"
-  rm -f "$ids"
+  rm -f "$phase_ids" "$rule_ids"
   log "Removed malicious Xcode build settings A3DC1C3 and AF17F99 from $project"
 }
 
