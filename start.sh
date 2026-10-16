@@ -272,12 +272,17 @@ Action guide
    What it does:
      - Checks shell startup files, defaults invelc, suspicious LaunchDaemon payload traits,
        self-deleting temporary AppleScript/native processes, Git hooks,
-       and known malicious indicators in every discovered Xcode project.
+       and malicious Xcode project.pbxproj indicators by behavior
+       (obfuscated xxd via printf|tr, hex|sh, p=xcode_phase/rule, sh -c "${SETTING}"
+       wrappers), plus legacy IOC names/domains.
      - Prints a terminal summary with the overall conclusion.
      - Writes a timestamped logs/security-incidents/security_incident_*/cleanup_report.txt.
      - Returns a non-zero status when suspicious indicators remain.
    Existing installs:
      - Read-only. It does not delete or modify anything.
+   Scope note:
+     - Scans working-tree files under Documents/Desktop/Downloads only.
+       Other Git branches are not checked out or scanned automatically.
 
 10) Clean user/project incident artifacts
    Script: cleanup_security_incident.sh clean
@@ -288,13 +293,16 @@ Action guide
      - Scans Documents/Desktop/Downloads and quarantines every suspicious Git hook.
      - Terminates known /tmp AppleScript/native memory payload shapes.
      - Scans every project.pbxproj under Documents/Desktop/Downloads.
-     - Separately backs up each affected project, then removes the complete Xcode
-       shell build phase/build rule that loads known malicious payloads and the A3DC1C3/AF17F99 settings.
+     - Backs up each affected project, then removes malicious Xcode shell build
+       phases/build rules and build settings matched by payload shape (not only
+       fixed keys like A3DC1C3/AF17F99), including obfuscated variants.
      - Re-scans after cleanup and returns a non-zero status if indicators remain.
    Safety:
      - This modifies user/project files. start.sh asks for confirmation first.
      - It does not run sudo and does not modify /Library.
      - Xcode must be closed first so stale in-memory project state cannot be saved back.
+     - Cleans only the current working-tree pbxproj. Other Git branches may still
+       contain the malware and need separate cleanup or a cleaned commit merge.
 
 11) Clean system incident artifacts
    Script: cleanup_security_incident.sh clean --system

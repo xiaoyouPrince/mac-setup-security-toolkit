@@ -348,7 +348,9 @@ quarantined_hooks/
 
 该模式还会检测后续事件中确认的内存载荷形态：从短 `/tmp` 脚本启动且携带长加密参数的 `osascript`、使用相同参数结构的 `/tmp` 原生可执行文件，以及会自删除的 `/private/tmp/m.app` applet。脚本会先记录并终止命中进程，再清理文件。执行清理前必须关闭 Xcode；否则脚本会停止，防止 Xcode 将内存中的旧工程状态重新写回。
 
-清理会对 `~/Documents`、`~/Desktop` 和 `~/Downloads` 下发现的每个 `project.pbxproj` 执行相同的恶意特征检查。每个命中工程都会单独备份，然后删除执行 `${A3DC1C3}` 的完整 Shell Build Phase 以及 `A3DC1C3`/`AF17F99` 变量值，不对任何单一仓库做特殊处理。
+清理会对 `~/Documents`、`~/Desktop` 和 `~/Downloads` 下发现的每个 `project.pbxproj` 执行相同的恶意特征检查。每个命中工程都会单独备份，然后按**载荷行为**删除恶意 Shell Build Phase / Build Rule 以及对应 Build Setting（含混淆 `printf|tr` 拼出 `xxd`、hex|sh、`sh -c "${SETTING}"` 包装等变种），不再只依赖固定键名 `A3DC1C3`/`AF17F99`。
+
+**范围说明：** 脚本只修改当前磁盘工作区中的 `project.pbxproj`，不会自动切换或清理其他 Git 分支。主分支工作区清干净后，其他仍含木马的分支在 checkout/merge 时可能再次污染工作区，需另行处理。
 
 清理用户、项目和系统文件：
 

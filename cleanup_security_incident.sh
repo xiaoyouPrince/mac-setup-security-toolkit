@@ -20,7 +20,9 @@ Usage:
   ./cleanup_security_incident.sh clean
       Back up and remove known user/project persistence:
       ~/.zshrc payload, defaults domain invelc, all suspicious Git hooks,
-      and malicious Xcode project build settings.
+      and malicious Xcode project build phases/settings (including obfuscated
+      xxd/hex|sh / \${SETTING} wrapper variants). Cleans the working-tree
+      project.pbxproj files only; other Git branches are not switched.
 
   ./cleanup_security_incident.sh clean --system
       Also unload/remove system LaunchDaemons matching known payload traits,
@@ -64,13 +66,15 @@ SCAN_ROOTS=(
   "$HOME/Desktop"
   "$HOME/Downloads"
 )
-PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p=|A3DC1C3|AF17F99'
-XCODE_PATTERN='A3DC1C3|AF17F99|base64 --decode|xxd -p -r|curl .*\| sh|curl .* -d "p=|cdnatapple|rigacdn|netcdnamz|amznprod|amzndev'
-PROCESS_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|com.google.rqbcle|CloudTelemetryService'
-LAUNCHD_IOC_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|CloudTelemetryService'
-LAUNCHD_EXEC_PATTERN='base64[[:space:]]+--decode|xxd[[:space:]]+-p[[:space:]]+-r|curl .*\|[[:space:]]*(ba)?sh|defaults[[:space:]]+read.*\|.*(ba)?sh'
-LAUNCHD_OBFUSCATED_EXEC_PATTERN='echo[[:space:]]+[A-Za-z0-9+/=]{32,}.*\|[[:space:]]*base64[[:space:]]+--decode[[:space:]]*\|[[:space:]]*(ba)?sh'
-GLOBAL_GIT_HOOK_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|/tmp/|/private/tmp/|base64|xxd|curl'
+# Behavior-first IOCs: obfuscated xxd (printf|tr), hex|sh, xcode_phase wrappers,
+# plus legacy setting IDs and known C2 fragments.
+PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|netcdnads|jhqt34n3qreu|googlenets|vigmanet|rigmanets|0je12fwoav7|base64 --decode|xxd -p -r|printf .*tr -d|\| t \| sh|p=xcode_(phase|rule)|curl .*\| sh|curl .* -d "p=|A3DC1C3|AF17F99|A3EA261|A870EE4'
+XCODE_PATTERN='A3DC1C3|AF17F99|A3EA261|A870EE4|base64 --decode|xxd -p -r|printf .*tr -d|\| t \| sh|p=xcode_(phase|rule)|curl .*\| sh|curl .* -d "p=|sh -c .*\$\{[A-Fa-f0-9]+\}|echo [0-9a-fA-F]{64,}|cdnatapple|rigacdn|netcdnamz|amznprod|amzndev|netcdnads|jhqt34n3qreu|googlenets|vigmanet|rigmanets|0je12fwoav7'
+PROCESS_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|jhqt34n3qreu|com.google.rqbcle|CloudTelemetryService'
+LAUNCHD_IOC_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|jhqt34n3qreu|CloudTelemetryService'
+LAUNCHD_EXEC_PATTERN='base64[[:space:]]+--decode|xxd[[:space:]]+-p[[:space:]]+-r|printf .*tr[[:space:]]+-d|curl .*\|[[:space:]]*(ba)?sh|defaults[[:space:]]+read.*\|.*(ba)?sh'
+LAUNCHD_OBFUSCATED_EXEC_PATTERN='echo[[:space:]]+[A-Za-z0-9+/=]{32,}.*\|[[:space:]]*base64[[:space:]]+--decode[[:space:]]*\|[[:space:]]*(ba)?sh|echo[[:space:]]+[0-9a-fA-F]{64,}.*\|.*(xxd|t).*\|[[:space:]]*(ba)?sh'
+GLOBAL_GIT_HOOK_PATTERN='invelc|scxqo|qnnx|netcdn|rigacdn|cdnatapple|amzndev|netcdnamz|amznprod|jhqt34n3qreu|/tmp/|/private/tmp/|base64|xxd|curl|printf .*tr -d'
 MEMORY_PROCESS_PATTERNS=(
   '^osascript /(private/)?tmp/[A-Za-z0-9._-]+ [A-Za-z0-9+/=]{100,}'
   '^/(private/)?tmp/[A-Za-z0-9._-]+ [A-Za-z0-9+/=]{100,}'
@@ -357,8 +361,11 @@ clean_shell_startup_files() {
       /echo .*base64 --decode .*sh/ { next }
       /base64 --decode/ { next }
       /xxd -p -r/ { next }
+      /printf .*tr -d/ { next }
+      /\| t \| sh/ { next }
+      /p=xcode_(phase|rule)/ { next }
       /curl .*\|[[:space:]]*(ba)?sh/ { next }
-      /cdnatapple|rigacdn|netcdnamz|amznprod|amzndev/ { next }
+      /cdnatapple|rigacdn|netcdnamz|amznprod|amzndev|netcdnads|jhqt34n3qreu|googlenets|vigmanet|rigmanets/ { next }
       { print }
     ' "$file" > "$tmp"
     cat "$tmp" > "$file"
@@ -410,12 +417,65 @@ clean_suspicious_git_hooks() {
   fi
 }
 
+find_malicious_xcode_setting_keys() {
+  local project="$1"
+  awk '
+    function is_malicious_value(line) {
+      return index(line, "A3DC1C3") || index(line, "AF17F99") ||
+             index(line, "base64 --decode") || index(line, "xxd -p -r") ||
+             (index(line, "printf") && index(line, "tr -d")) ||
+             index(line, "| t | sh") ||
+             index(line, "p=xcode_phase") || index(line, "p=xcode_rule") ||
+             line ~ /curl .*\| sh/ || (index(line, "curl") && index(line, "-d \"p=")) ||
+             line ~ /echo [0-9a-fA-F]{64,}/ ||
+             line ~ /cdnatapple|rigacdn|netcdnamz|amznprod|amzndev|netcdnads|jhqt34n3qreu|googlenets|vigmanet|rigmanets|0je12fwoav7/
+    }
+    /^[[:space:]]*[A-Za-z0-9_]+[[:space:]]*=[[:space:]]*".*"/ {
+      if (!is_malicious_value($0)) next
+      line = $0
+      sub(/^[ \t]*/, "", line)
+      split(line, fields, " ")
+      key = fields[1]
+      if (key ~ /^[A-Za-z0-9_]+$/) print key
+    }
+  ' "$project" | sort -u
+}
+
 malicious_xcode_section_ids() {
   local project="$1"
   local section="$2"
-  awk -v section="$section" '
-    function is_malicious(line) {
-      return index(line, "A3DC1C3")         || index(line, "AF17F99")         || index(line, "base64 --decode")         || index(line, "xxd -p -r")         || line ~ /curl .*\| sh/         || line ~ /curl .* -d \"p=/
+  local keys_file="${3:-}"
+  local keys=""
+  local key
+
+  if [[ -n "$keys_file" && -f "$keys_file" ]]; then
+    while IFS= read -r key; do
+      [[ -n "$key" ]] || continue
+      keys="${keys}|${key}"
+    done < "$keys_file"
+    keys="${keys#|}"
+  fi
+
+  awk -v section="$section" -v keys="$keys" '
+    function is_malicious(line,   i, n, arr) {
+      if (index(line, "A3DC1C3") || index(line, "AF17F99") ||
+          index(line, "base64 --decode") || index(line, "xxd -p -r") ||
+          (index(line, "printf") && index(line, "tr -d")) ||
+          index(line, "| t | sh") ||
+          index(line, "p=xcode_phase") || index(line, "p=xcode_rule") ||
+          line ~ /curl .*\| sh/ || (index(line, "curl") && index(line, "-d \"p=")) ||
+          line ~ /sh -c .*\$\{[A-Fa-f0-9]+\}/ ||
+          line ~ /echo [0-9a-fA-F]{64,}/ ||
+          line ~ /cdnatapple|rigacdn|netcdnamz|amznprod|amzndev|netcdnads|jhqt34n3qreu|googlenets|vigmanet|rigmanets|0je12fwoav7/) {
+        return 1
+      }
+      if (keys != "") {
+        n = split(keys, arr, "|")
+        for (i = 1; i <= n; i++) {
+          if (arr[i] != "" && index(line, "${" arr[i] "}")) return 1
+        }
+      }
+      return 0
     }
     $0 ~ "Begin " section " section" { in_section = 1; next }
     $0 ~ "End " section " section" { in_section = 0; capturing = 0 }
@@ -462,33 +522,79 @@ remove_xcode_objects_by_id() {
 
 clean_malicious_xcode_project() {
   local project="$1"
-  local phase_ids rule_ids
-  local tmp
+  local phase_ids rule_ids keys_file
+  local tmp key
 
+  keys_file="$(mktemp)"
   phase_ids="$(mktemp)"
   rule_ids="$(mktemp)"
-  malicious_xcode_section_ids "$project" "PBXShellScriptBuildPhase" > "$phase_ids"
-  malicious_xcode_section_ids "$project" "PBXBuildRule" > "$rule_ids"
+  find_malicious_xcode_setting_keys "$project" > "$keys_file"
+
+  if [[ -s "$keys_file" ]]; then
+    while IFS= read -r key; do
+      [[ -n "$key" ]] || continue
+      log "Detected malicious Xcode build setting key: $key"
+    done < "$keys_file"
+  fi
+
+  malicious_xcode_section_ids "$project" "PBXShellScriptBuildPhase" "$keys_file" > "$phase_ids"
+  malicious_xcode_section_ids "$project" "PBXBuildRule" "$keys_file" > "$rule_ids"
 
   remove_xcode_objects_by_id "$project" "$phase_ids" "shell build phase"
   remove_xcode_objects_by_id "$project" "$rule_ids" "build rule"
 
   tmp="$(mktemp)"
-  awk '
-    /A3DC1C3 =/ { next }
-    /AF17F99 =/ { next }
-    /= ".*base64 --decode/ { next }
-    /= ".*xxd -p -r/ { next }
-    /= ".*curl .*cdnatapple/ { next }
-    /= ".*curl .*rigacdn/ { next }
-    /= ".*curl .*netcdnamz/ { next }
-    /= ".*curl .*amznprod/ { next }
-    /= ".*curl .*amzndev/ { next }
-    { print }
-  ' "$project" > "$tmp"
+  if [[ -s "$keys_file" ]]; then
+    awk -v keys_file="$keys_file" '
+      BEGIN {
+        while ((getline line < keys_file) > 0) {
+          if (line != "") bad[line] = 1
+        }
+        close(keys_file)
+      }
+      {
+        for (key in bad) {
+          if ($0 ~ ("^[[:space:]]*" key "[[:space:]]*=")) next
+        }
+        if ($0 ~ /= ".*base64 --decode/) next
+        if ($0 ~ /= ".*xxd -p -r/) next
+        if ($0 ~ /= ".*printf .*tr -d/) next
+        if ($0 ~ /= ".*\| t \| sh/) next
+        if ($0 ~ /= ".*p=xcode_(phase|rule)/) next
+        if ($0 ~ /= ".*curl .*cdnatapple/) next
+        if ($0 ~ /= ".*curl .*rigacdn/) next
+        if ($0 ~ /= ".*curl .*netcdnamz/) next
+        if ($0 ~ /= ".*curl .*amznprod/) next
+        if ($0 ~ /= ".*curl .*amzndev/) next
+        if ($0 ~ /= ".*curl .*netcdnads/) next
+        if ($0 ~ /= ".*curl .*jhqt34n3qreu/) next
+        if ($0 ~ /= ".*curl .*googlenets/) next
+        if ($0 ~ /= ".*curl .*vigmanet/) next
+        if ($0 ~ /= ".*curl .*rigmanets/) next
+        if ($0 ~ /= ".*echo [0-9a-fA-F]{64,}/) next
+        print
+      }
+    ' "$project" > "$tmp"
+  else
+    awk '
+      /= ".*base64 --decode/ { next }
+      /= ".*xxd -p -r/ { next }
+      /= ".*printf .*tr -d/ { next }
+      /= ".*\| t \| sh/ { next }
+      /= ".*p=xcode_(phase|rule)/ { next }
+      /= ".*curl .*cdnatapple/ { next }
+      /= ".*curl .*rigacdn/ { next }
+      /= ".*curl .*netcdnamz/ { next }
+      /= ".*curl .*amznprod/ { next }
+      /= ".*curl .*amzndev/ { next }
+      /= ".*curl .*netcdnads/ { next }
+      /= ".*curl .*jhqt34n3qreu/ { next }
+      /= ".*echo [0-9a-fA-F]{64,}/ { next }
+      { print }
+    ' "$project" > "$tmp"
+  fi
   cat "$tmp" > "$project"
-  rm -f "$tmp"
-  rm -f "$phase_ids" "$rule_ids"
+  rm -f "$tmp" "$phase_ids" "$rule_ids" "$keys_file"
   log "Removed malicious Xcode build settings and decoder payload values from $project"
 }
 
@@ -579,7 +685,7 @@ print_summary() {
   suspicious_cron="$(suspicious_crontab_count)"
   suspicious_global_hooks="$(suspicious_global_git_hooks_path_count)"
 
-  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$suspicious_launchdaemons" -eq 0 && "$suspicious_memory" -eq 0 && "$suspicious_hooks" -eq 0 && "$suspicious_cron" -eq 0 && "$suspicious_global_hooks" -eq 0 ]]; then
+  if [[ "$matches" -eq 0 && "$defaults_state" == "absent" && "$suspicious_launchdaemons" -eq 0 && "$suspicious_memory" -eq 0 && "$suspicious_xcode_projects" -eq 0 && "$suspicious_hooks" -eq 0 && "$suspicious_cron" -eq 0 && "$suspicious_global_hooks" -eq 0 ]]; then
     conclusion="clean"
   else
     conclusion="attention required"

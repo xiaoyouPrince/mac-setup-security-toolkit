@@ -348,7 +348,9 @@ This mode also runs the Git hook scanner in apply mode. Every suspicious non-sam
 
 It also detects memory-resident payload shapes observed during the follow-up incident: `osascript` launched from a short `/tmp` script with a long encrypted argument, native `/tmp` executables using the same argument shape, and the self-deleting `/private/tmp/m.app` applet. Matching processes are recorded and terminated before file cleanup. Xcode must be closed before cleanup; otherwise the script stops to prevent stale in-memory project state from restoring the contaminated project file.
 
-For every `project.pbxproj` discovered under `~/Documents`, `~/Desktop`, and `~/Downloads`, cleanup checks the same malicious traits. Each affected project is backed up separately before cleanup removes the complete shell build phase that evaluates `${A3DC1C3}` and the `A3DC1C3`/`AF17F99` values. No repository receives special-case handling.
+For every `project.pbxproj` discovered under `~/Documents`, `~/Desktop`, and `~/Downloads`, cleanup checks the same malicious traits. Each affected project is backed up separately before cleanup removes malicious shell build phases/build rules and matching build settings by **payload behavior** (including obfuscated `printf|tr` → `xxd`, hex|sh, and `sh -c "${SETTING}"` wrappers), not only fixed keys such as `A3DC1C3`/`AF17F99`.
+
+**Scope:** the script edits working-tree `project.pbxproj` files only. It does not check out or clean other Git branches. After cleaning one branch's working tree, other infected branches can reintroduce the malware on checkout/merge and must be handled separately.
 
 Clean user, project, and system artifacts:
 
